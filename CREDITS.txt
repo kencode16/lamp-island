@@ -1,0 +1,35 @@
+《守燈小島》素材來源與授權
+================================
+
+【配樂】
+menu／day／night／boss 四首配樂為本遊戲以程式作曲、算圖（js/audio/build/music.py），
+使用下列 Meta CC0 樂器取樣，加上程式合成的長笛、弦樂、銅管、鐘琴與打擊樂。
+
+【音效】
+多數音效由下列素材剪輯、變調、疊合後製成，其餘為程式合成（js/audio/build/sfx.py）。
+
+1. SFX Kit 1.0.0 — Wyzowl
+   https://github.com/wyzowl/sfx-kit
+   授權：CC0 1.0（公眾領域）
+
+2. Meta Piano、Meta Nylon Guitar — Meta Open Sound
+   https://github.com/facebookincubator/Meta-open-sound
+   授權：CC0 1.0（公眾領域）
+
+3. The Medieval Weapons Sound Effects Library — Still North Media
+   取自 https://github.com/PanderMusubi/sound-effects-library-weapons （sword-clash）
+   授權：CC0 1.0（公眾領域）
+
+4. "Oculus Audio Pack 01" by Oculus VR, LLC
+   (https://developers.meta.com/vr/downloads/package/oculus-audio-pack-1/),
+   licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
+   取自 Meta Open Sound 的 oculus-audio-pack 合集。
+   使用並修改（變調、剪輯、與其他聲音疊合、加殘響）的檔案：
+     CREAHmn_GiantEffort_OS_01  → 王的吼聲（sfx/bossRoar）
+     CREAHmn_GiantDeath_OS_01   → 王倒下（sfx/bossDeath）
+     VOXMale_Male01Hurt_OS_01   → 英雄受傷（sfx/heroHurt）
+     VOXMale_Male01Death_OS_01  → 英雄倒下（sfx/heroDeath）
+   以上四個音效是「改作」，原作者 Oculus VR, LLC 不代表認可本遊戲。
+
+【其他】
+3D 模型為程式生成。其他模組若加入外部素材，請補在這裡。
