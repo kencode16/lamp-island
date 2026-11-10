@@ -14,32 +14,37 @@ function lerpAngle(a, b, t) {
 // ---- 血條（billboard，永遠面向鏡頭）----
 const barGeo = new THREE.PlaneGeometry(1, 1);
 barGeo.translate(0.5, 0, 0); // 從左邊長出來
+// v1.1 修正：原本黑底是半透明、血量是不透明，three.js 會把半透明的東西放到最後才畫，
+// 黑底就蓋在血量上面 → 整條看起來是黑的。現在三層都放進同一個（半透明）繪製佇列，
+// 再用 renderOrder 固定順序：黑底 → 血量 → 護盾。不受色調映射與霧影響，夜晚、霧天也一樣鮮豔。
+const barMat = (color, opacity = 1) => new THREE.MeshBasicMaterial({
+  color, transparent: true, opacity, depthTest: false, depthWrite: false, toneMapped: false, fog: false,
+});
 const barMats = {
-  bg: new THREE.MeshBasicMaterial({ color: 0x1b1410, transparent: true, opacity: 0.78, depthTest: false, depthWrite: false }),
-  hp: new THREE.MeshBasicMaterial({ color: 0x7be06a, depthTest: false, depthWrite: false }),
-  low: new THREE.MeshBasicMaterial({ color: 0xf0b13c, depthTest: false, depthWrite: false }),
-  crit: new THREE.MeshBasicMaterial({ color: 0xe8513f, depthTest: false, depthWrite: false }),
-  boss: new THREE.MeshBasicMaterial({ color: 0xd8453a, depthTest: false, depthWrite: false }),
-  hero: new THREE.MeshBasicMaterial({ color: 0x5fb7ff, depthTest: false, depthWrite: false }),
-  shield: new THREE.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.9, depthTest: false, depthWrite: false }),
+  bg: barMat(0x1b1410, 0.8),
+  enemy: barMat(0xff3b30),   // 怪物（含王）：紅色
+  hero: barMat(0x4fb2ff),    // 英雄：藍色，和怪物區分
+  shield: barMat(0xcdeeff, 0.95),
 };
 function makeBar(width, kind) {
   const g = new THREE.Group();
   const bg = new THREE.Mesh(barGeo, barMats.bg);
-  const fg = new THREE.Mesh(barGeo, kind === 'boss' ? barMats.boss : kind === 'hero' ? barMats.hero : barMats.hp);
+  const fg = new THREE.Mesh(barGeo, kind === 'hero' ? barMats.hero : barMats.enemy);
   const sh = new THREE.Mesh(barGeo, barMats.shield);
-  const h = kind === 'boss' ? 0.11 : 0.07;
-  bg.scale.set(width + 0.04, h + 0.035, 1); bg.position.x = -(width + 0.04) / 2;
+  const h = kind === 'boss' ? 0.14 : 0.095;
+  const pad = 0.035;
+  bg.scale.set(width + pad * 2, h + pad * 2, 1); bg.position.x = -(width + pad * 2) / 2;
   fg.scale.set(width, h, 1); fg.position.set(-width / 2, 0, 0.001);
-  sh.scale.set(0, h * 0.45, 1); sh.position.set(-width / 2, h * 0.28, 0.002);
-  for (const m of [bg, fg, sh]) { m.renderOrder = 1000; m.frustumCulled = false; }
+  sh.scale.set(0, h * 0.4, 1); sh.position.set(-width / 2, h * 0.3, 0.002);
+  bg.renderOrder = 1000; fg.renderOrder = 1001; sh.renderOrder = 1002;
+  for (const m of [bg, fg, sh]) m.frustumCulled = false;
   g.add(bg, fg, sh);
   return { g, fg, sh, width, kind };
 }
+// frac：剩餘血量比例（紅條長度）；shieldFrac：護盾 / 最大血量（上方淡藍細條）
 function setBar(bar, frac, shieldFrac) {
   frac = Math.max(0, Math.min(1, frac));
   bar.fg.scale.x = Math.max(0.0001, bar.width * frac);
-  if (bar.kind === 'enemy') bar.fg.material = frac > 0.5 ? barMats.hp : frac > 0.25 ? barMats.low : barMats.crit;
   bar.sh.scale.x = Math.max(0.0001, bar.width * Math.min(1, shieldFrac || 0));
   bar.sh.visible = shieldFrac > 0;
 }
@@ -155,10 +160,10 @@ export function createView(world) {
       let v = enemies.get(e.id);
       if (!v) {
         const obj = getEnemyObj(e.type);
-        const bar = makeBar(e.boss ? 1.6 : 0.6, e.boss ? 'boss' : 'enemy');
+        const bar = makeBar(e.boss ? 1.6 : 0.62, e.boss ? 'boss' : 'enemy');
         root.add(obj); root.add(bar.g);
         v = { obj, type: e.type, bar, px: e.x, py: e.y || 0, pz: e.z, yaw: e.yaw || 0, seen: 0,
-              height: obj.userData.height || 0.8 };
+              height: obj.userData.height || 0.8, hurt: false };
         enemies.set(e.id, v);
       }
       v.seen = frame;
@@ -171,7 +176,9 @@ export function createView(world) {
         speed: e.speed || 1, frozen: e.frozen > 0, slowed: e.slow > 0, attacking: !!e.blocked,
       });
       // 血條：受傷或有護盾或王才顯示
-      const show = e.boss || e.hp < e.maxHp || e.shield > 0;
+      // 還沒被攻擊不顯示；第一次被打中（命中事件或血量減少）之後一直顯示
+      if (!v.hurt && e.hp < e.maxHp) v.hurt = true;
+      const show = v.hurt;
       v.bar.g.visible = show;
       if (show) {
         v.bar.g.position.set(wx(x), y + v.height + 0.18, wz(z));
@@ -255,7 +262,7 @@ export function createView(world) {
     switch (ev.type) {
       case 'shoot': { const t = towers.get(ev.towerId); t?.obj.userData.fire?.(); break; }
       case 'pulse': { const t = towers.get(ev.towerId); t?.obj.userData.fire?.(); break; }
-      case 'hit': { const e = enemies.get(ev.targetId); e?.obj.userData.hit?.(); break; }
+      case 'hit': { const e = enemies.get(ev.targetId); if (e) { e.hurt = true; e.obj.userData.hit?.(); } break; }
       case 'heroAttack': hero?.obj.userData.attack?.(); break;
       case 'upgrade': { const t = towers.get(ev.towerId); if (t) t.pop = 0.45; break; }
     }
