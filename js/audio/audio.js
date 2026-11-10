@@ -229,9 +229,18 @@ async function loadQueue(keys, conc = 4) {
 }
 
 let preloadStarted = false;
+// v1.3（整合者）：holdPreload(promise) 讓預載等某件事做完再開始（例如開場動畫播完），不跟影片搶網路
+let preloadGate = null;
+function holdPreload(p) { preloadGate = p && typeof p.then === 'function' ? p : null; }
+
 function startPreload() {
   if (preloadStarted || !ensureCtx()) return;
   preloadStarted = true;
+  if (preloadGate) { const g = preloadGate; preloadGate = null; g.then(runPreload, runPreload); return; }
+  runPreload();
+}
+
+function runPreload() {
   const names = Object.keys(SFX);
   const byPri = (p) => names.filter((n) => (DEF[n] ? DEF[n].pri : 1) === p).map((n) => 'sfx:' + n);
   // 先載 UI 與常用音效，再載其餘，最後才是結算音樂與環境音
@@ -636,6 +645,7 @@ export const audio = {
   ambience: safe(ambience),
   playStars: safe(playStars),
   setSpatial: safe((fn) => { spatialFn = typeof fn === 'function' ? fn : null; }),
+  holdPreload: safe(holdPreload),
   mute: safe((m) => { muted = !!m; if (master) master.gain.setTargetAtTime(muted ? 0 : 1, ctx.currentTime, 0.05); }),
   moodFor,
   stats: safe(stats),

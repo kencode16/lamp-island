@@ -20,6 +20,14 @@ const CSS = `
   animation: inPulse 1.8s ease-in-out infinite; }
 #intro .in-play { left: 50%; top: 50%; transform: translate(-50%, -50%); min-height: 64px; padding: 0 28px; font-size: 18px; }
 @keyframes inPulse { 50% { box-shadow: 0 0 0 6px rgba(255, 214, 140, .18); } }
+/* v1.3 載入中提示：影片在等資料（網路慢）時顯示 */
+#intro .in-load { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column;
+  align-items: center; gap: 12px; color: #f3e3bd; font: 500 14px/1 -apple-system, "PingFang TC", sans-serif; letter-spacing: .15em;
+  opacity: 0; transition: opacity .35s; pointer-events: none; }
+#intro .in-load.is-on { opacity: 1; }
+#intro .in-load i { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255, 226, 160, .22);
+  border-top-color: #ffd98a; animation: inSpin .9s linear infinite; }
+@keyframes inSpin { to { transform: rotate(360deg); } }
 `;
 
 export function playIntro(src) {
@@ -45,14 +53,17 @@ export function playIntro(src) {
     const play = btn('in-play', '▶ 播放開場');
     sound.style.display = 'none';
     play.style.display = 'none';
-    root.append(video, skip, sound, play);
+    const loading = document.createElement('div');
+    loading.className = 'in-load';
+    loading.append(document.createElement('i'), document.createTextNode('載入中…'));
+    root.append(video, loading, skip, sound, play);
     document.body.appendChild(root);
 
     let done = false;
     const finish = () => {
       if (done) return;
       done = true;
-      clearTimeout(skipTimer); clearTimeout(stallTimer);
+      clearTimeout(skipTimer); clearTimeout(stallTimer); clearTimeout(loadTimer);
       root.classList.add('is-out');
       try { video.pause(); } catch (e) { /* 忽略 */ }
       resolve();
@@ -62,6 +73,18 @@ export function playIntro(src) {
     // 「略過」1 秒後出現；如果 6 秒還沒開始播（網路慢），也確保略過鈕在
     const skipTimer = setTimeout(() => skip.classList.add('is-on'), 1000);
     const stallTimer = setTimeout(() => { if (video.currentTime < 0.2) skip.classList.add('is-on'); }, 6000);
+
+    // 載入中：等資料超過 0.4 秒才顯示（網路快時不會閃一下）；開始播就收起來
+    let loadTimer = 0;
+    const setLoading = (on) => {
+      clearTimeout(loadTimer);
+      if (on) loadTimer = setTimeout(() => { if (!done && play.style.display === 'none') loading.classList.add('is-on'); }, 400);
+      else loading.classList.remove('is-on');
+    };
+    setLoading(true);
+    video.addEventListener('waiting', () => setLoading(true));
+    video.addEventListener('playing', () => setLoading(false));
+    video.addEventListener('timeupdate', () => { if (video.currentTime > 0 && !video.paused && video.readyState >= 3) setLoading(false); });
 
     const showSound = () => { sound.style.display = ''; requestAnimationFrame(() => sound.classList.add('is-on')); };
     const unmute = () => {
@@ -94,6 +117,7 @@ export function playIntro(src) {
       showSound();   // 馬上顯示，不等影片真的開始（網路慢時可能要等一下）
       video.play().catch(() => {
         sound.style.display = 'none';
+        setLoading(false);
         play.style.display = '';
         requestAnimationFrame(() => play.classList.add('is-on'));
         skip.classList.add('is-on');

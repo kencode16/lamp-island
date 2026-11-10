@@ -37,6 +37,8 @@ function boot() {
   world = createWorld(document.getElementById('scene'));
   fx = createEffects(world);
   view = createView(world);
+  // v1.3：開場動畫播放中先不下載音效（約 5 MB），把網路讓給影片；動畫結束才開始預載
+  if (introActive()) audio.holdPreload?.(window.__intro.done);
   audio.init?.();
   audio.setSpatial?.((x, z) => {
     const s = world.toScreen(x, 0, z);
