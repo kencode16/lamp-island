@@ -33,6 +33,15 @@
 <div id="scene"></div>
 <div id="ui"></div>
 <div id="boot"><div class="glow"></div>守燈小島<small id="bootMsg">點亮中…</small></div>
+<script type="module">
+  // 開場動畫（v1.2）：獨立的小模組，不用等遊戲主程式載完就能先播；主程式在背後載入
+  import { playIntro } from './js/intro.js';
+  const p = new URLSearchParams(location.search);
+  const skip = p.has('nointro') || (p.has('debug') && !p.has('intro'));
+  const intro = { active: !skip, done: skip ? Promise.resolve() : playIntro('assets/video/intro.mp4') };
+  intro.done.then(() => { intro.active = false; });
+  window.__intro = intro;
+</script>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

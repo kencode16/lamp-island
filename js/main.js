@@ -27,7 +27,12 @@ let tutorialTimer = 0;
 const isBuildable = (ch) => ch === '#' || ch === 'o';
 const cellChar = (c, r) => (level && level.grid[r] ? level.grid[r][c] : '~');
 
+let gestured = false;
+const introActive = () => !!(window.__intro && window.__intro.active);
+
 function boot() {
+  // 開場動畫結束後：使用者已經點過畫面（音效已解鎖）就接上標題音樂
+  window.__intro?.done.then(() => { if (gestured && mode !== 'game') audio.music?.('menu'); });
   progress = loadProgress();
   world = createWorld(document.getElementById('scene'));
   fx = createEffects(world);
@@ -57,7 +62,8 @@ function boot() {
       if (i >= 0 && i + 1 < LEVELS.length) startLevel(LEVELS[i + 1].id); else goMap();
     },
     onSettings: (s) => { progress = loadProgress(); progress.settings = { ...(progress.settings || {}), ...s }; saveProgress(progress); applySettings(progress.settings); },
-    onUserGesture: () => { audio.unlock?.(); if (mode !== 'game') audio.music?.('menu'); },
+    // 開場動畫播放中先只解鎖音效，不放標題音樂（避免蓋過影片聲音），等動畫結束再放
+    onUserGesture: () => { audio.unlock?.(); gestured = true; if (mode !== 'game' && !introActive()) audio.music?.('menu'); },
     onMenuClosed: () => { menu = null; world.hideRange?.(); world.highlightCell?.(0, 0, null); },
     onScreen: (name) => { if (name === 'map' || name === 'title' || name === 'talents') enterMenuMode(name); },
     onHeroSelect: () => { closeMenus(); selectHero(!heroSelected); },
