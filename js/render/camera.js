@@ -150,7 +150,8 @@ export function createCameraRig(camera, dom, hooks = {}) {
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     cam.vel.set(0, 0); cam.yawVel = 0; focusGoal = null; zoomAnchor = null;
     if (pointers.size === 1) {
-      tap = { id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: performance.now(), moved: 0,
+      // v2.0（整合者）：用事件發生的時間 e.timeStamp 計時，主執行緒忙（掉幀）時不會把點擊誤判成長按
+      tap = { id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: e.timeStamp || performance.now(), moved: 0,
         valid: e.pointerType !== 'mouse' || e.button === 0, pointerType: e.pointerType || 'mouse' };
       if (e.pointerType === 'mouse' && (e.button === 2 || e.button === 1)) { mode = 'rotate'; lastX = e.clientX; resetSamples(); pushSample(); }
       else startPan(e.clientX, e.clientY);
@@ -209,7 +210,7 @@ export function createCameraRig(camera, dom, hooks = {}) {
     try { dom.releasePointerCapture(e.pointerId); } catch (_) { /* 忽略 */ }
     const cancelled = e.type === 'pointercancel';
     if (tap && e.pointerId === tap.id) {
-      const dt = performance.now() - tap.t0;
+      const dt = (e.timeStamp || performance.now()) - tap.t0;
       const ok = !cancelled && tap.valid && tap.moved < TAP_MOVE && dt < TAP_TIME && pointers.size === 0;
       const info = { x: e.clientX, y: e.clientY, type: tap.pointerType };
       tap = null;
