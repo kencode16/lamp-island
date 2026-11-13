@@ -1,6 +1,7 @@
 // 風格化海面（擁有者：C）：shader 波紋、岸邊白色泡沫（靠海岸距離場）、淺灘半透明、太陽反光、融入霧。
 import * as THREE from 'three';
 import { SEA_Y, BOTTOM_Y } from './terrain.js';
+import { DK_GLSL_SAMPLE } from './darkness.js';
 
 const VERT = /* glsl */`
 #include <fog_pars_vertex>
@@ -25,6 +26,7 @@ uniform float uRain, uSpec;
 varying vec3 vWorld;
 varying vec2 vShoreUV;
 #include <fog_pars_fragment>
+${DK_GLSL_SAMPLE}
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p) {
   vec2 i = floor(p), f = fract(p);
@@ -63,6 +65,18 @@ void main() {
   ringMask *= (1.0 - smoothstep(0.3, 1.25, d)) * step(0.14, d) * smoothstep(0.35, 0.6, fn + 0.3);
   float foam = max(rim, ringMask * 0.85) * inside;
   col = mix(col, uFoam, foam);
+  // 第二章黑暗：光外的湖面幾乎全黑，光裡的湖面映出燈光（暖色／冷色波光）。第一章 uDkOn = 0 不會進來。
+  if (uDkOn > 0.0) {
+    vec4 L = dkLit(vWorld.xz);
+    vec3 tint = vec3(1.0) + uDkWarm * L.g + uDkCool * L.b;
+    // 湖面映出光源：稀疏、會閃的波光（暖光偏橘、冷光偏青）
+    float glint = smoothstep(0.64, 0.86, n2 * 0.55 + n3 * 0.6) * (0.55 + 0.45 * sin(t * 1.7 + p.x * 2.3 + p.y * 1.9));
+    vec3 reflCol = vec3(1.0, 0.72, 0.4) * L.g + vec3(0.45, 0.8, 1.0) * L.b + vec3(0.5, 0.55, 0.6) * max(0.0, 1.0 - L.g - L.b);
+    vec3 refl = reflCol * (glint * 0.1 + 0.012) * L.r;
+    vec3 litCol = col * tint * uDkBoost + refl;
+    vec3 darkCol = col * uDkAmb * 1.2 + uDkRim * band * 0.4;
+    col = mix(col, mix(darkCol, litCol, L.r), uDkOn);
+  }
   float alpha = mix(0.58, 1.0, smoothstep(0.1, 1.7, d));
   alpha = max(alpha, foam);
   gl_FragColor = vec4(col, alpha);
@@ -70,7 +84,7 @@ void main() {
   #include <fog_fragment>
 }`;
 
-export function createWater(scene) {
+export function createWater(scene, dk = null) {
   const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
     uTime: { value: 0 },
     uShore: { value: null },
@@ -85,6 +99,12 @@ export function createWater(scene) {
     uRain: { value: 0 },
     uSpec: { value: 1 },
   }]);
+  // 黑暗效果的 uniform（與 darkness.js 共用同一份物件）；沒給就用關閉的預設值
+  const dkU = dk || {
+    uDkOn: { value: 0 }, uDkMap: { value: null }, uDkRect: { value: new THREE.Vector4(0, 0, 1, 1) }, uDkGlobal: { value: 0 }, uDkBoost: { value: 1 },
+    uDkAmb: { value: new THREE.Vector3() }, uDkRim: { value: new THREE.Vector3() }, uDkWarm: { value: new THREE.Vector3() }, uDkCool: { value: new THREE.Vector3() },
+  };
+  for (const k of Object.keys(dkU)) uniforms[k] = dkU[k];
   const mat = new THREE.ShaderMaterial({
     uniforms, vertexShader: VERT, fragmentShader: FRAG,
     transparent: true, fog: true, toneMapped: false, depthWrite: true,

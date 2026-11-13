@@ -3,7 +3,8 @@
 // userData.update(dt, { moving, speed, frozen, slowed, attacking })、userData.hit()、userData.height
 import * as THREE from 'three';
 import { C, halo } from '../palette.js';
-import { part, pivot, makeSkin, PI, TAU } from './lib.js';
+import { part, partG, pivot, makeSkin, PI, TAU } from './lib.js';
+import { ENEMIES2 } from './enemies2.js';
 
 const H2 = PI / 2;
 
@@ -17,13 +18,13 @@ function slimeProfile(R, H, closed = false) {
 function slimeFace(b, s, y, z0, ex, blush = C.petalPink) {
   for (const sx of [-1, 1]) {
     b.ico(0.05 * s, 0, C.pupil, { p: [sx * ex * s, y, z0], r: [0, sx * 0.4, 0], s: [0.85, 1.2, 0.5] }, { jit: 0, shine: 1 });
-    b.boxC(0.022 * s, 0.022 * s, 0.01, C.white, { p: [sx * ex * s + 0.012 * s, y + 0.025 * s, z0 + 0.024 * s], r: [0, sx * 0.4, 0] }, { glow: 0.6, jit: 0 });
+    b.boxC(0.022 * s, 0.022 * s, 0.01, C.white, { p: [sx * ex * s + 0.012 * s, y + 0.025 * s, z0 + 0.024 * s], r: [0, sx * 0.4, 0] }, { glow: 0.6, jit: 0, nd: true });
     b.ico(0.032 * s, 0, blush, { p: [sx * (ex + 0.075) * s, y - 0.05 * s, z0 - 0.025 * s], r: [0, sx * 0.7, 0], s: [1, 0.6, 0.4] }, { jit: 0 });
   }
   b.boxC(0.05 * s, 0.016 * s, 0.01, C.mouth, { p: [0, y - 0.06 * s, z0 + 0.005] }, { jit: 0 });
 }
 function slimeMesh(key, R, H, col, top, glossY) {
-  return part(key, (b) => {
+  return partG(key, (b) => {
     b.lathe(slimeProfile(R, H), 9, col, {}, { top, shine: 0.85, jit: 0.04, wob: R * 0.02 });
     slimeFace(b, R / 0.3, H * 0.5, R * 0.86, 0.09);
     b.ico(0.055 * R / 0.3, 0, C.white, { p: [-R * 0.38, glossY ?? H * 0.82, R * 0.3], r: [0.4, 0, 0.4], s: [1.3, 0.45, 0.8] }, { glow: 0.45, jit: 0 });
@@ -35,10 +36,10 @@ function slimeLike(type) {
   const rig = new THREE.Group(); g.add(rig);
   let height, hopH, freq;
   if (type === 'slimelet') {
-    rig.add(slimeMesh('en:slimelet', 0.19, 0.27, C.slimelet, C.slimeletTop));
+    rig.add(...slimeMesh('en:slimelet', 0.19, 0.27, C.slimelet, C.slimeletTop));
     height = 0.3; hopH = 0.09; freq = 3.0;
   } else {
-    rig.add(slimeMesh('en:slime', 0.29, 0.42, C.slime, C.slimeTop));
+    rig.add(...slimeMesh('en:slime', 0.29, 0.42, C.slime, C.slimeTop));
     // 頭頂小芽
     rig.add(part('en:slime:sprout', (b) => {
       b.cyl(0.008, 0.012, 0.06, 4, C.leafDark, { p: [0, 0.4, 0] });
@@ -80,14 +81,14 @@ function splitter() {
   const lobes = [];
   for (const sx of [-1, 1]) {
     const p = pivot(sx * 0.13, 0, 0); rig.add(p);
-    const m = part('en:splitter:lobe', (b) => {
+    const m = partG('en:splitter:lobe', (b) => {
       b.lathe(slimeProfile(0.22, 0.4), 7, C.splitter, {}, { top: C.splitterTop, shine: 0.85, jit: 0.04, wob: 0.005 });
       for (const sx of [-1, 1]) {
         b.ico(0.038, 0, C.pupil, { p: [sx * 0.055, 0.23, 0.195], r: [0, sx * 0.4, 0], s: [0.85, 1.2, 0.5] }, { jit: 0, shine: 1 });
-        b.boxC(0.016, 0.016, 0.01, C.white, { p: [sx * 0.055 + 0.009, 0.25, 0.213], r: [0, sx * 0.4, 0] }, { glow: 0.6, jit: 0 });
+        b.boxC(0.016, 0.016, 0.01, C.white, { p: [sx * 0.055 + 0.009, 0.25, 0.213], r: [0, sx * 0.4, 0] }, { glow: 0.6, jit: 0, nd: true });
       }
     });
-    p.add(m); p.rotation.y = -sx * 0.22; p.rotation.z = -sx * 0.06;
+    p.add(...m); p.rotation.y = -sx * 0.22; p.rotation.z = -sx * 0.06;
     lobes.push(p);
   }
   const skin = makeSkin(g);
@@ -127,7 +128,7 @@ function slimeKing() {
   const g = new THREE.Group();
   const rig = new THREE.Group(); g.add(rig);
   const R = 0.74, H = 1.12;
-  rig.add(part('en:slimeKing:body', (b) => {
+  rig.add(...partG('en:slimeKing:body', (b) => {
     b.lathe(slimeProfile(R, H), 12, C.king, {}, { top: C.kingTop, shine: 0.85, jit: 0.04, wob: 0.012 });
     // 底部黏液小團
     for (let i = 0; i < 7; i++) {
@@ -138,8 +139,8 @@ function slimeKing() {
     for (const sx of [-1, 1]) {
       const ex = sx * 0.21, ey = 0.6, ez = 0.66;
       b.ico(0.12, 1, C.pupil, { p: [ex, ey, ez], r: [0, sx * 0.32, 0], s: [0.85, 1.15, 0.42] }, { jit: 0, shine: 1 });
-      b.boxC(0.05, 0.05, 0.02, C.white, { p: [ex + 0.035, ey + 0.045, ez + 0.05], r: [0, sx * 0.32, 0] }, { glow: 0.7, jit: 0 });
-      b.boxC(0.022, 0.022, 0.02, C.white, { p: [ex - 0.03, ey - 0.04, ez + 0.05], r: [0, sx * 0.32, 0] }, { glow: 0.7, jit: 0 });
+      b.boxC(0.05, 0.05, 0.02, C.white, { p: [ex + 0.035, ey + 0.045, ez + 0.05], r: [0, sx * 0.32, 0] }, { glow: 0.7, jit: 0, nd: true });
+      b.boxC(0.022, 0.022, 0.02, C.white, { p: [ex - 0.03, ey - 0.04, ez + 0.05], r: [0, sx * 0.32, 0] }, { glow: 0.7, jit: 0, nd: true });
       b.boxC(0.2, 0.045, 0.06, '#2f7a2a', { p: [ex - sx * 0.01, ey + 0.17, ez - 0.03], r: [0, sx * 0.32, sx * -0.42] });
       b.ico(0.07, 0, C.petalPink, { p: [sx * 0.42, 0.42, 0.56], r: [0, sx * 0.7, 0], s: [1, 0.6, 0.4] }, { jit: 0 });
     }
@@ -234,7 +235,7 @@ function walker(g, rig, legs, arms, opt) {
 function goblin() {
   const g = new THREE.Group();
   const rig = new THREE.Group(); g.add(rig);
-  rig.add(part('en:goblin:body', (b) => {
+  rig.add(...partG('en:goblin:body', (b) => {
     // 身體與腰帶
     b.cyl(0.1, 0.13, 0.19, 6, C.leather, { p: [0, 0.15, 0] }, { top: '#a8744c' });
     b.boxC(0.26, 0.03, 0.22, C.woodDark, { p: [0, 0.18, 0] });
@@ -243,7 +244,7 @@ function goblin() {
     b.dodec(0.13, C.goblin, { p: [0, 0.42, 0.01], s: [1.12, 0.95, 1] }, { top: C.goblinLight, jit: 0.05 });
     for (const sx of [-1, 1]) {
       b.coneC(0.045, 0.19, 4, C.goblin, { p: [sx * 0.19, 0.45, -0.01], r: [0.25, 0, sx * -(H2 - 0.35)] }, { top: '#c56a5a' });
-      b.boxC(0.04, 0.034, 0.02, '#ffe14a', { p: [sx * 0.05, 0.44, 0.12] }, { glow: 0.9, jit: 0 });
+      b.boxC(0.04, 0.034, 0.02, '#ffe14a', { p: [sx * 0.05, 0.44, 0.12] }, { glow: 0.9, jit: 0, nd: true });
       // 手臂
       b.boxC(0.05, 0.15, 0.055, C.goblin, { p: [sx * 0.15, 0.24, 0.02], r: [-0.4, 0, sx * 0.25] });
     }
@@ -274,7 +275,7 @@ function goblin() {
 function skeleton() {
   const g = new THREE.Group();
   const rig = new THREE.Group(); g.add(rig);
-  rig.add(part('en:skeleton:body', (b) => {
+  rig.add(...partG('en:skeleton:body', (b) => {
     b.boxC(0.15, 0.05, 0.08, C.bone, { p: [0, 0.28, 0] });
     // 白骨胸腔（中間兩條肋骨縫）＋生鏽腰帶與單邊肩甲
     b.cyl(0.13, 0.1, 0.2, 6, C.bone, { p: [0, 0.31, 0], r: [0, PI / 6, 0] }, { top: C.white });
@@ -286,7 +287,7 @@ function skeleton() {
     b.boxC(0.2, 0.16, 0.18, C.bone, { p: [0, 0.62, 0.01] }, { top: C.white });
     b.boxC(0.15, 0.05, 0.13, C.boneDark, { p: [0, 0.525, 0.03] });
     b.boxC(0.16, 0.05, 0.02, C.black, { p: [0, 0.625, 0.1] }, { jit: 0 });
-    for (const sx of [-1, 1]) b.boxC(0.035, 0.03, 0.02, C.eyeOrange, { p: [sx * 0.042, 0.625, 0.106] }, { glow: 1.6, jit: 0 });
+    for (const sx of [-1, 1]) b.boxC(0.035, 0.03, 0.02, C.eyeOrange, { p: [sx * 0.042, 0.625, 0.106] }, { glow: 1.6, jit: 0, nd: true });
     // 生鏽圓盾（左手）＋生鏽的劍（右手）
     b.cylC(0.14, 0.14, 0.03, 8, C.rust, { p: [-0.21, 0.32, 0.08], r: [H2, 0, 0.25], o: 'ZXY' }, { jit: 0.2, top: C.rustLight });
     b.boxC(0.05, 0.05, 0.03, C.iron, { p: [-0.205, 0.32, 0.1] }, { shine: 0.6 });
@@ -310,17 +311,17 @@ function skeleton() {
 function golem() {
   const g = new THREE.Group();
   const rig = new THREE.Group(); g.add(rig);
-  rig.add(part('en:golem:body', (b) => {
+  rig.add(...partG('en:golem:body', (b) => {
     b.dodec(0.38, C.golem, { p: [0, 0.7, 0], s: [1.18, 0.95, 0.85] }, { top: C.golemLight, wob: 0.02, jit: 0.08 });
     b.box(0.4, 0.2, 0.3, C.golemDark, { p: [0, 0.3, -0.02] }, { wob: 0.015 });
     // 苔蘚
     b.ico(0.17, 0, C.moss, { p: [-0.2, 0.98, -0.03], s: [1.3, 0.35, 1.1] }, { top: C.leafLight, wob: 0.02 });
     // 胸口熔岩裂紋
-    b.boxC(0.035, 0.24, 0.02, C.eyeOrange, { p: [-0.05, 0.72, 0.32], r: [0, 0, 0.35] }, { glow: 1.3, jit: 0 });
-    b.boxC(0.035, 0.15, 0.02, C.eyeOrange, { p: [0.07, 0.66, 0.32], r: [0, 0, -0.6] }, { glow: 1.3, jit: 0 });
+    b.boxC(0.035, 0.24, 0.02, C.eyeOrange, { p: [-0.05, 0.72, 0.32], r: [0, 0, 0.35] }, { glow: 1.3, jit: 0, nd: true });
+    b.boxC(0.035, 0.15, 0.02, C.eyeOrange, { p: [0.07, 0.66, 0.32], r: [0, 0, -0.6] }, { glow: 1.3, jit: 0, nd: true });
     // 頭（陷在肩膀裡）＋發光眼帶
     b.ico(0.16, 0, C.golemLight, { p: [0, 1.06, 0.12], s: [1.15, 0.85, 1] }, { wob: 0.012 });
-    b.boxC(0.17, 0.035, 0.03, C.eyeOrange, { p: [0, 1.06, 0.255] }, { glow: 1.6, jit: 0 });
+    b.boxC(0.17, 0.035, 0.03, C.eyeOrange, { p: [0, 1.06, 0.255] }, { glow: 1.6, jit: 0, nd: true });
   }));
   const legs = [];
   for (const sx of [-1, 1]) {
@@ -350,28 +351,28 @@ function golem() {
 function shaman() {
   const g = new THREE.Group();
   const rig = new THREE.Group(); g.add(rig);
-  rig.add(part('en:shaman:body', (b) => {
+  rig.add(...partG('en:shaman:body', (b) => {
     b.lathe([[0.21, 0], [0.22, 0.04], [0.17, 0.2], [0.12, 0.38], [0.1, 0.48], [0, 0.52]], 8, C.shaman, {}, { top: '#7a44b0', jit: 0.05 });
     b.cyl(0.215, 0.225, 0.04, 7, C.shamanTrim, { p: [0, 0.015, 0] }, { shine: 0.8 });
     b.boxC(0.04, 0.2, 0.02, C.shamanTrim, { p: [0, 0.2, 0.17], r: [-0.22, 0, 0] }, { shine: 0.6 });
     // 兜帽與黑臉、發光眼
     b.cone(0.14, 0.34, 7, C.shamanDark, { p: [0, 0.44, -0.03], r: [-0.4, 0, 0] }, { top: C.shaman });
     b.oct(0.085, C.black, { p: [0, 0.55, 0.06], s: [1, 1, 0.8] }, { jit: 0 });
-    for (const sx of [-1, 1]) b.boxC(0.03, 0.022, 0.02, '#ff6cf0', { p: [sx * 0.032, 0.56, 0.125] }, { glow: 1.6, jit: 0 });
+    for (const sx of [-1, 1]) b.boxC(0.03, 0.022, 0.02, '#ff6cf0', { p: [sx * 0.032, 0.56, 0.125] }, { glow: 1.6, jit: 0, nd: true });
     // 袖子與手
     for (const sx of [-1, 1]) {
       b.cone(0.06, 0.2, 4, C.shaman, { p: [sx * 0.13, 0.42, 0.04], r: [-0.6, 0, sx * 2.6] }, { top: C.shamanDark });
       b.oct(0.035, '#3d3448', { p: [sx * 0.19, 0.29, 0.14] });
     }
     // 符文腰飾
-    b.oct(0.035, '#ff6cf0', { p: [0, 0.32, 0.15] }, { glow: 1, shine: 1 });
+    b.oct(0.035, '#ff6cf0', { p: [0, 0.32, 0.15] }, { glow: 1, shine: 1, nd: true });
   }));
   // 法杖
   const staffP = pivot(0.19, 0.29, 0.14); rig.add(staffP);
-  staffP.add(part('en:shaman:staff', (b) => {
+  staffP.add(...partG('en:shaman:staff', (b) => {
     b.cylC(0.014, 0.016, 0.9, 5, C.woodDark, { p: [0, 0.12, 0] });
     b.torus(0.07, 0.014, 3, 6, PI * 1.4, C.shamanTrim, { p: [0, 0.6, 0], r: [0, 0, -PI * 0.2] }, { shine: 0.8 });
-    b.ico(0.06, 0, '#ff8ff4', { p: [0, 0.62, 0] }, { glow: 1.2, shine: 1, top: C.white, jit: 0 });
+    b.ico(0.06, 0, '#ff8ff4', { p: [0, 0.62, 0] }, { glow: 1.2, shine: 1, top: C.white, jit: 0, nd: true });
   }));
   const orbHalo = halo('#e070ff', 0.42, 0.7); orbHalo.position.y = 0.62; staffP.add(orbHalo);
   const skin = makeSkin(g);
@@ -401,7 +402,7 @@ function nightLord() {
   const g = new THREE.Group();
   const rig = new THREE.Group(); g.add(rig);
   const A = C.nightArmor, AL = C.nightArmorLight, T = C.nightTrim;
-  rig.add(part('en:nightLord:body', (b) => {
+  rig.add(...partG('en:nightLord:body', (b) => {
     // 腰甲裙
     b.cyl(0.2, 0.28, 0.24, 8, AL, { p: [0, 0.5, 0], r: [0, PI / 8, 0] }, { top: A });
     b.cylC(0.21, 0.21, 0.04, 8, T, { p: [0, 0.72, 0], r: [0, PI / 8, 0] }, { glow: 0.7 });
@@ -423,13 +424,13 @@ function nightLord() {
     for (const sx of [-1, 1]) {
       b.cone(0.045, 0.22, 5, AL, { p: [sx * 0.1, 1.38, 0], r: [0, 0, sx * -0.9] }, { top: '#8f86b0' });
       b.cone(0.03, 0.2, 5, '#8f86b0', { p: [sx * 0.27, 1.49, 0], r: [-0.15, 0, sx * -0.15] }, { top: C.white });
-      b.boxC(0.06, 0.025, 0.03, C.eyeRed, { p: [sx * 0.045, 1.33, 0.115], r: [0, 0, sx * -0.25] }, { glow: 2, jit: 0 });
+      b.boxC(0.06, 0.025, 0.03, C.eyeRed, { p: [sx * 0.045, 1.33, 0.115], r: [0, 0, sx * -0.25] }, { glow: 2, jit: 0, nd: true });
     }
     b.boxC(0.02, 0.1, 0.02, T, { p: [0, 1.4, 0.112] }, { glow: 0.8, jit: 0 });
     // 左手舉著暗紫法球
     b.boxC(0.09, 0.28, 0.1, A, { p: [-0.33, 0.95, 0.1], r: [-0.9, 0, 0.2] }, { shine: 0.4 });
     b.ico(0.06, 0, AL, { p: [-0.36, 0.86, 0.24] });
-    b.ico(0.1, 1, '#b04cff', { p: [-0.36, 0.96, 0.3] }, { glow: 1.3, shine: 1, top: '#ffb0ff', jit: 0 });
+    b.ico(0.1, 1, '#b04cff', { p: [-0.36, 0.96, 0.3] }, { glow: 1.3, shine: 1, top: '#ffb0ff', jit: 0, nd: true });
   }));
   // 披風
   const capeP = pivot(0, 1.14, -0.13); rig.add(capeP);
@@ -516,13 +517,13 @@ function flyer(g, rig, wings, opt) {
 function gargoyle() {
   const g = new THREE.Group();
   const rig = new THREE.Group(); g.add(rig);
-  rig.add(part('en:gargoyle:body', (b) => {
+  rig.add(...partG('en:gargoyle:body', (b) => {
     b.dodec(0.15, C.gargoyle, { p: [0, 0, 0], r: [0.4, 0, 0], s: [1, 1.15, 1.1] }, { top: C.gargoyleLight, wob: 0.01 });
     b.ico(0.1, 0, C.gargoyle, { p: [0, 0.12, 0.15], s: [1.05, 0.9, 1] }, { top: C.gargoyleLight, wob: 0.008 });
     b.boxC(0.1, 0.06, 0.08, C.gargoyleDark, { p: [0, 0.09, 0.24] });
     for (const sx of [-1, 1]) {
       b.cone(0.03, 0.15, 3, C.gargoyleDark, { p: [sx * 0.05, 0.19, 0.13], r: [-0.9, 0, sx * -0.3] }, { top: '#c8ccd4' });
-      b.boxC(0.035, 0.022, 0.02, C.eyeOrange, { p: [sx * 0.04, 0.13, 0.245] }, { glow: 1.6, jit: 0 });
+      b.boxC(0.035, 0.022, 0.02, C.eyeOrange, { p: [sx * 0.04, 0.13, 0.245] }, { glow: 1.6, jit: 0, nd: true });
       // 爪子與腳
       b.boxC(0.04, 0.12, 0.04, C.gargoyleDark, { p: [sx * 0.08, -0.08, 0.12], r: [0.5, 0, 0] });
       b.boxC(0.05, 0.1, 0.06, C.gargoyleDark, { p: [sx * 0.07, -0.13, -0.05], r: [-0.4, 0, 0] });
@@ -551,12 +552,12 @@ function gargoyle() {
 function bat() {
   const g = new THREE.Group();
   const rig = new THREE.Group(); g.add(rig);
-  rig.add(part('en:bat:body', (b) => {
+  rig.add(...partG('en:bat:body', (b) => {
     b.dodec(0.1, C.bat, { s: [1, 1.1, 0.95] }, { top: '#a774ee', jit: 0.05 });
     b.ico(0.055, 0, '#c9a6ff', { p: [0, -0.035, 0.06], s: [1, 1, 0.6] });
     for (const sx of [-1, 1]) {
       b.cone(0.045, 0.13, 4, C.bat, { p: [sx * 0.05, 0.06, 0], r: [0, 0, sx * -0.35] }, { top: '#f0a0d8' });
-      b.boxC(0.035, 0.035, 0.02, '#ffe94a', { p: [sx * 0.035, 0.02, 0.09] }, { glow: 1.6, jit: 0 });
+      b.boxC(0.035, 0.035, 0.02, '#ffe94a', { p: [sx * 0.035, 0.02, 0.09] }, { glow: 1.6, jit: 0, nd: true });
       b.coneC(0.01, 0.03, 3, C.white, { p: [sx * 0.018, -0.03, 0.088], r: [PI, 0, 0] }, { jit: 0 });
       b.boxC(0.02, 0.05, 0.02, C.batDark, { p: [sx * 0.03, -0.1, -0.01] });
     }
@@ -582,6 +583,7 @@ function bat() {
 const BUILD = {
   slime: () => slimeLike('slime'), slimelet: () => slimeLike('slimelet'), splitter, goblin, skeleton,
   gargoyle, bat, golem, shaman, slimeKing, nightLord,
+  ...ENEMIES2,
 };
 
 /** makeEnemy(type) */

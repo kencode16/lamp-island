@@ -2,11 +2,12 @@
 // UI 是蓋在 canvas 上的 DOM：根層 pointer-events:none，只有可互動元素吃事件，3D 畫面照樣能拖曳。
 
 import { h, icon } from './dom.js';
-import { SKILLS } from '../data/heroes.js';
+import { SKILLS, HEROES, HERO_SKILLS } from '../data/heroes.js';
 import { loadProgress, recordResult } from './save.js';
 import { FALLBACK_LEVELS } from './levels_fallback.js';
 import { createHUD } from './hud.js';
 import { createMenus } from './menus.js';
+import { TOWERS } from '../data/towers.js';
 import { createTitle, createMap, createTalents, createPause, createResult, createSettings, createRotate } from './screens.js';
 
 const SHARED_DEFS = `<svg class="ui-defs" width="0" height="0" aria-hidden="true" focusable="false"><defs>
@@ -25,6 +26,7 @@ export function createUI(rootElement, handlers = {}) {
   let paused = false, resultOpen = false, speed = 1;
   let targeting = null, tipText = null;
   let currentLevel = null, lastState = null;
+  let levelsExplicit = false;   // 呼叫端用 ui.setLevels 給過資料，就不再被自動載入的 levels.js 蓋掉
 
   const call = (name, ...args) => {
     const f = handlers && handlers[name];
@@ -63,6 +65,7 @@ export function createUI(rootElement, handlers = {}) {
     leaveResult: name => { hideResult(); call(name); },
     safe, compact: () => compactMQ.matches,
     layerRect: () => root.getBoundingClientRect(),
+    lastLevel: () => currentLevel,
   };
 
   // ---------- 元件 ----------
@@ -71,6 +74,7 @@ export function createUI(rootElement, handlers = {}) {
     speedToggle: () => toggleSpeed(),
     callWave: () => callWave(),
     skill: id => useSkill(id),
+    heroSkill: id => useHeroSkill(id),
     hero: () => heroTap(),
   });
   const menus = createMenus(ctx);
@@ -105,7 +109,7 @@ export function createUI(rootElement, handlers = {}) {
 
   // ---------- 正式關卡資料（F 的 levels.js；不存在就用備用資料） ----------
   import('../data/levels.js').then(m => {
-    if (Array.isArray(m.LEVELS) && m.LEVELS.length) api.setLevels(m.LEVELS);
+    if (!levelsExplicit && Array.isArray(m.LEVELS) && m.LEVELS.length) setLevelsInner(m.LEVELS);
   }).catch(() => { /* 還沒有 levels.js：用備用資料 */ });
 
   // ---------- 畫面切換 ----------
@@ -128,6 +132,7 @@ export function createUI(rootElement, handlers = {}) {
     }
     if (name !== 'map') map.closeInfo();
     if (changed) call('onScreen', name);
+    return changed;
   }
 
   function setPaused(p, notify) {
@@ -178,17 +183,37 @@ export function createUI(rootElement, handlers = {}) {
     call('onSkill', id);
   }
 
+  const heroName = () => (HEROES[lastState?.hero?.type] || HEROES.knight)?.name || '英雄';
+
   function heroTap() {
     if (screen !== 'game' || paused) return;
     const hr = lastState?.hero;
     sound('click');
-    if (hr?.state === 'dead') { toast(`守燈騎士 ${Math.ceil(hr.respawnIn || 0)} 秒後復活`); return; }
+    if (hr?.state === 'dead') { toast(`${heroName()} ${Math.ceil(hr.respawnIn || 0)} 秒後復活`); return; }
     menus.close('cancel');
     if (targeting) { setTargetingInner(null); call('onCancelTargeting'); }
     // 有 onHeroSelect：選取／取消與提示文字都由 main 負責（main 再呼叫 ui.setHeroSelected 同步外框）
     if (typeof handlers.onHeroSelect === 'function') call('onHeroSelect');
-    else toast('點島上的騎士，再點地面就能移動');
+    else toast(`點畫面上的${heroName()}，再點地面就能移動`);
   }
+
+  // 英雄技能（頭像旁兩顆按鈕、鍵盤 C／V）：檢查完才呼叫 handlers.onHeroSkill(skillId)；
+  // 要指定地點的技能由 main 呼叫 ui.setTargeting(skillId) 進入瞄準（和流星雨一樣）
+  function useHeroSkill(id) {
+    if (screen !== 'game' || paused || resultOpen) return;
+    const def = HERO_SKILLS[id];
+    const hr = lastState?.hero;
+    const st = hr?.skills?.[id];
+    if (!def || !st) { sound('error'); return; }
+    if (targeting === id) { cancelTargeting(); return; }
+    if (hr.state === 'dead') { sound('error'); toast(`${heroName()}倒下了，${Math.ceil(hr.respawnIn || 0)} 秒後復活`); return; }
+    if (!st.unlocked) { sound('error'); toast(`英雄升到 Lv${def.minLevel || 1} 才能用${def.name}`); return; }
+    if ((st.cd || 0) > 0) { sound('error'); toast(`${def.name}冷卻中（${Math.ceil(st.cd)} 秒）`); return; }
+    menus.close('api');
+    sound('click');
+    call('onHeroSkill', id);
+  }
+  const heroSkillKey = i => { const id = hud.heroSkillIds()[i]; if (id) useHeroSkill(id); };
 
   function cancelTargeting() {
     if (!targeting) return;
@@ -198,10 +223,11 @@ export function createUI(rootElement, handlers = {}) {
   }
 
   function setTargetingInner(id) {
-    targeting = id && SKILLS[id] ? id : null;
+    targeting = id && (SKILLS[id] || HERO_SKILLS[id]) ? id : null;
     hud.setTargeting(targeting);
+    root.classList.toggle('is-hero-targeting', !!(targeting && HERO_SKILLS[targeting]));
     if (targeting) {
-      const d = SKILLS[targeting];
+      const d = SKILLS[targeting] || HERO_SKILLS[targeting];
       tgtIco.textContent = d.icon || '✦';
       tgtTxt.textContent = d.needsTarget === false ? `${d.name}：點一下施放` : `點地面施放${d.name}`;
       menus.close('api');
@@ -291,6 +317,7 @@ export function createUI(rootElement, handlers = {}) {
       else if (resultOpen) { const b = result.el.querySelector('.res-btns .ui-btn:last-child'); if (b) { e.preventDefault(); b.click(); } }
       return;
     }
+    if (screen === 'map' && !e.repeat && map.key(code)) { e.preventDefault(); return; }
     if (screen !== 'game' || resultOpen) return;
 
     if (code === 'Space' || k === ' ') { e.preventDefault(); if (!e.repeat) togglePause(); return; }
@@ -302,6 +329,8 @@ export function createUI(rootElement, handlers = {}) {
       case 'KeyN': e.preventDefault(); callWave(); break;
       case 'KeyZ': e.preventDefault(); useSkill('meteor'); break;
       case 'KeyX': e.preventDefault(); useSkill('freeze'); break;
+      case 'KeyC': e.preventDefault(); heroSkillKey(0); break;
+      case 'KeyV': e.preventDefault(); heroSkillKey(1); break;
       default: break;   // WASD、Q/E、方向鍵、+/- 留給鏡頭
     }
   }
@@ -329,14 +358,20 @@ export function createUI(rootElement, handlers = {}) {
   };
   for (const t of gestureTypes) window.addEventListener(t, onGesture, true);
 
+  function setLevelsInner(list) {
+    levels = list;
+    if (screen === 'map') map.render();
+  }
+
   // ---------- 對外 API ----------
   const api = {
     showTitle() { setScreen('title'); title.focus(); },
 
     showMap(p) {
       if (p) progress = p;
+      const entering = screen !== 'map' && screen !== 'talents';   // 從天賦頁回來時保留原本看的章
       setScreen('map');
-      map.render();
+      map.render(entering);
     },
 
     showTalents(p) {
@@ -389,7 +424,9 @@ export function createUI(rootElement, handlers = {}) {
     openBuildMenu(screenX, screenY, data) {
       if (screen !== 'game' || paused || resultOpen) return;
       setTargetingInner(null);
-      menus.openBuild(screenX, screenY, data);
+      const lvId = currentLevel?.id;
+      const opts = (data?.options || []).filter(o => o && !(lvId != null && (TOWERS[o.type]?.unlock || 0) > lvId));
+      menus.openBuild(screenX, screenY, { ...data, options: opts });
     },
 
     openTowerMenu(screenX, screenY, data) {
@@ -408,8 +445,8 @@ export function createUI(rootElement, handlers = {}) {
     /** 換成正式關卡資料（ui 也會自己動態 import js/data/levels.js） */
     setLevels(list) {
       if (!Array.isArray(list) || !list.length) return;
-      levels = list;
-      if (screen === 'map') map.render();
+      levelsExplicit = true;
+      setLevelsInner(list);
     },
     /** 打開設定視窗（credits = true 直接顯示製作名單） */
     showSettings(credits) { settings.open(!!credits); },
@@ -420,6 +457,11 @@ export function createUI(rootElement, handlers = {}) {
     isMenuOpen() { return menus.isOpen(); },
     /** 'build' | 'tower' | null */
     menuKind() { return menus.kind(); },
+    /** 航海圖目前顯示的章節；setMapChapter(n) 切換 */
+    get mapChapter() { return map.chapter; },
+    setMapChapter(n) { map.setChapter(n); },
+    /** 目前關卡（showGame 給的 levelDef） */
+    get level() { return currentLevel; },
     get screen() { return screen; },
     get paused() { return paused; },
     get speed() { return speed; },
@@ -429,4 +471,4 @@ export function createUI(rootElement, handlers = {}) {
   return api;
 }
 
-export { loadProgress, saveProgress, starsEarned, starsSpent } from './save.js';
+export { loadProgress, saveProgress, starsEarned, starsSpent, isHeroUnlocked, chosenHero, unlocksForClear, isChapterUnlocked } from './save.js';

@@ -1,7 +1,11 @@
 // 塔模型：弓箭塔、投石砲、法師塔、樹靈塔（1–3 級＋第 4 級分支 a/b）（擁有者：B）
 import * as THREE from 'three';
-import { C, halo } from '../palette.js';
+import { C, MAT, halo } from '../palette.js';
 import { part, pivot, PI, TAU, clamp, damp } from './lib.js';
+import { TOWERS2 } from './towers2.js';
+
+/** 第一章的塔：setLit 是空函式（合約：所有塔都要有 userData.setLit） */
+const noop = () => {};
 
 const H2 = PI / 2;
 
@@ -264,7 +268,7 @@ function archerTower(v) {
 
   let recoil = 0, flashT = 0;
   g.userData = {
-    kind: 'tower', type: 'archer', level: v,
+    kind: 'tower', type: 'archer', level: v, setLit: noop,
     head, muzzle, height: v === 1 ? 1.12 : v === 2 ? 1.5 : v === 3 ? 1.6 : v === 'a' ? 1.85 : 2.25,
     fire() { recoil = 1; flashT = 0.07; },
     update(dt) {
@@ -417,7 +421,7 @@ function catapultTower(v) {
       const f = part('tw:catapult:flame', (b) => {
         b.cone(0.07, 0.2, 5, C.fire, {}, { top: C.flameCore, glow: 1.3, jit: 0.04 });
         b.cone(0.04, 0.12, 5, C.flameCore, { p: [0.03, 0, 0.02] }, { glow: 1.4, jit: 0 });
-      }, { cast: false });
+      }, { cast: false, mat: MAT.glow });
       f.position.set(x, 0.44, z);
       g.add(f);
       const h = halo(C.flame, 0.42, 0.55); h.position.set(x, 0.55, z); g.add(h);
@@ -428,7 +432,7 @@ function catapultTower(v) {
   let t = 0, ft = -1, shake = 0;
   const seed = Math.random() * 10;
   g.userData = {
-    kind: 'tower', type: 'catapult', level: v,
+    kind: 'tower', type: 'catapult', level: v, setLit: noop,
     head, muzzle, height: v === 1 ? 0.95 : v === 2 ? 1.15 : v === 3 ? 1.35 : v === 'a' ? 1.85 : 1.4,
     fire() { ft = 0; },
     update(dt) {
@@ -547,7 +551,7 @@ function mageTower(v) {
   const orbG = pivot(0, orbY, 0); g.add(orbG);
   const orb = part(k + ':orb', (b) => {
     b.ico(orbR, 1, orbColor, {}, { glow: 0.9, shine: 1, jit: 0.1, top: lightning ? C.white : frost ? C.white : C.magicPink });
-  }, { cast: false });
+  }, { cast: false, mat: MAT.glow });
   orbG.add(orb);
   const orbHalo = halo(orbColor, orbR * 5, 0.6); orbG.add(orbHalo);
   const muzzle = new THREE.Object3D(); orbG.add(muzzle);
@@ -577,7 +581,7 @@ function mageTower(v) {
 
   let t = Math.random() * 10, pulse = 0;
   g.userData = {
-    kind: 'tower', type: 'mage', level: v,
+    kind: 'tower', type: 'mage', level: v, setLit: noop,
     head: null, muzzle, height: orbY + orbR + 0.1,
     fire() { pulse = 1; },
     update(dt) {
@@ -733,7 +737,7 @@ function treantTower(v) {
 
   let t = Math.random() * 10, pulse = 0;
   g.userData = {
-    kind: 'tower', type: 'treant', level: v,
+    kind: 'tower', type: 'treant', level: v, setLit: noop,
     head: null, muzzle, height: cfg.cy + (ancient ? 0.75 : thorn ? 0.78 : v === 3 ? 0.72 : v === 2 ? 0.58 : 0.5),
     fire() { pulse = 1; },
     update(dt) {
@@ -755,12 +759,13 @@ function treantTower(v) {
 }
 
 // ===========================================================================
-const BUILD = { archer: archerTower, catapult: catapultTower, mage: mageTower, treant: treantTower };
+const BUILD = { archer: archerTower, catapult: catapultTower, mage: mageTower, treant: treantTower, ...TOWERS2 };
 
-/** makeTower(type, level 1–3, branch null|'a'|'b') */
+/** makeTower(type, level 1–3, branch null|'a'|'b')；燈籠沒有分支（給了分支＝3 級） */
 export function makeTower(type, level = 1, branch = null) {
   const fn = BUILD[type] || BUILD.archer;
-  const v = branch === 'a' || branch === 'b' ? branch : clamp(level | 0 || 1, 1, 3);
+  let v = branch === 'a' || branch === 'b' ? branch : clamp(level | 0 || 1, 1, 3);
+  if (type === 'lantern' && typeof v === 'string') v = 3;
   const g = fn(v);
   g.name = `tower:${type}:${v}`;
   return g;

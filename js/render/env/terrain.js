@@ -14,7 +14,10 @@ export const BOTTOM_Y = -1.7;
 export const DECOR_KIND = {
   T: 'tree', P: 'pine', R: 'rock', M: 'mushroom', H: 'house', W: 'windmill', F: 'fence',
   G: 'grave', D: 'dock', K: 'bush', C: 'crystal', Y: 'lamppost',
+  U: 'glowshroom', X: 'stalagmite', Q: 'minecart',
 };
+/** 第二章洞窟主題時，覆蓋上面的對照（C 換成洞窟水晶） */
+export const CAVE_DECOR_KIND = { C: 'cavecrystal', U: 'glowshroom', X: 'stalagmite', Q: 'minecart' };
 export const WALKABLE = new Set(['=', 'B', 'o', 'S', 'L']);
 
 export function makeGridInfo(levelDef) {
@@ -41,7 +44,7 @@ export function surfaceOf(ch) {
 // ---------------------------------------------------------------------------
 // 共用：幫幾何體加上每面一色的頂點色（非索引）
 const _col = new THREE.Color();
-function faceColored(geo, hex, vary, rnd, mossHex = null, mossChance = 0) {
+export function faceColored(geo, hex, vary, rnd, mossHex = null, mossChance = 0) {
   const g = geo.index ? geo.toNonIndexed() : geo;
   for (const k of Object.keys(g.attributes)) if (k !== 'position') g.deleteAttribute(k);
   g.computeVertexNormals();
@@ -60,14 +63,14 @@ function faceColored(geo, hex, vary, rnd, mossHex = null, mossChance = 0) {
 }
 
 const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _s = new THREE.Vector3();
-function place(geo, x, y, z, ry = 0, sx = 1, sy = 1, sz = 1, rx = 0, rz = 0) {
+export function place(geo, x, y, z, ry = 0, sx = 1, sy = 1, sz = 1, rx = 0, rz = 0) {
   _e.set(rx, ry, rz); _q.setFromEuler(_e); _p.set(x, y, z); _s.set(sx, sy, sz);
   geo.applyMatrix4(_m4.compose(_p, _q, _s));
   return geo;
 }
 
 /** 不規則的低多邊形岩石 */
-function rockGeo(rnd, hex, moss = true) {
+export function rockGeo(rnd, hex, moss = true) {
   const g = new THREE.IcosahedronGeometry(1, 0);   // 本來就是 non-indexed
   const a = g.attributes.position.array;
   const k = Math.floor(rnd() * 1e6);
@@ -152,15 +155,26 @@ const SEA_OUT = [0, 0.012, 0.05, 0.1, 0.17, 0.38];
 const LIP = { grass: '#63a947', sand: '#dcc68e', road: '#a27c4e', plaza: '#b3a996' };
 function lipKind(ch) { return ch === ',' ? 'sand' : (ch === '=' || ch === 'S') ? 'road' : 'grass'; }
 
-function buildWalls(G, L, seed) {
-  const { W, H, at } = G;
-  const pos = [], col = [];
-  const c3 = new THREE.Color();
-  const rowColors = {
+const WALL_COLORS = {
+  island: {
     grass: ['#63a947', '#8e6a44', '#7a583a', '#857c71', '#686159'],
     road: ['#a27c4e', '#8e6a44', '#7a583a', '#857c71', '#686159'],
     sand: ['#dcc68e', '#cbb07a', '#a8875a', '#857c71', '#686159'],
-  };
+    step: '#8a7048',
+  },
+  cave: {
+    grass: ['#6a6058', '#4f4842', '#423c38', '#37332f', '#2a2725'],
+    road: ['#7c654e', '#56493d', '#463d35', '#37332f', '#2a2725'],
+    sand: ['#7a736a', '#5c5650', '#47423d', '#37332f', '#2a2725'],
+    step: '#4f4842',
+  },
+};
+
+function buildWalls(G, L, seed, theme = 'island') {
+  const { W, H, at } = G;
+  const pos = [], col = [];
+  const c3 = new THREE.Color();
+  const rowColors = WALL_COLORS[theme] || WALL_COLORS.island;
   const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpN = new THREE.Vector3();
   function quad(p0, p1, p2, p3, hex, vary, outX, outZ) {
     // p0,p1 上緣；p3,p2 下緣
@@ -191,7 +205,7 @@ function buildWalls(G, L, seed) {
         if (nt < top - 0.001) {
           for (let s = 0; s < 2; s++) {
             const a = L(pts[s][0], pts[s][1]), b = L(pts[s + 1][0], pts[s + 1][1]);
-            quad([a.x, top, a.z], [b.x, top, b.z], [b.x, nt, b.z], [a.x, nt, a.z], '#8a7048', 0.06, dc, dr);
+            quad([a.x, top, a.z], [b.x, top, b.z], [b.x, nt, b.z], [a.x, nt, a.z], rowColors.step, 0.06, dc, dr);
           }
         }
         continue;
@@ -227,8 +241,10 @@ function buildWalls(G, L, seed) {
 
 // ---------------------------------------------------------------------------
 // 岸邊岩石
-function buildCoastRocks(G, L, seaEdges, rnd, out) {
+function buildCoastRocks(G, L, seaEdges, rnd, out, theme = 'island') {
   const { at } = G;
+  const cave = theme === 'cave';
+  const rc = cave ? ['#4c4845', '#57524d', '#45423f'] : ['#8f8a84', '#9a9186', '#8a857e'];
   for (const e of seaEdges) {
     const { c, r, dc, dr, nb } = e;
     if (nb === 'B' || nb === 'D') continue;
@@ -245,14 +261,14 @@ function buildCoastRocks(G, L, seaEdges, rnd, out) {
       const x = mid.x + dc * outD + (dc === 0 ? along : 0);
       const z = mid.z + dr * outD + (dr === 0 ? along : 0);
       const y = SEA_Y - 0.05 + (rnd() - 0.2) * s * 0.7;
-      const g = rockGeo(rnd, rnd() < 0.5 ? '#8f8a84' : '#9a9186');
+      const g = rockGeo(rnd, rnd() < 0.5 ? rc[0] : rc[1], !cave);
       place(g, x, y, z, rnd() * 6.28, s * (0.9 + rnd() * 0.5), s * (0.6 + rnd() * 0.4), s * (0.9 + rnd() * 0.5));
       out.push(g);
     }
   }
-  // 外海幾顆小礁石（點綴）
+  // 外海幾顆小礁石（點綴；洞窟的外圍是岩壁，不放）
   const { W, H } = G;
-  for (let i = 0; i < Math.round((W + H) / 6); i++) {
+  for (let i = 0; i < (cave ? 0 : Math.round((W + H) / 6)); i++) {
     const side = Math.floor(rnd() * 4);
     let x, z;
     if (side === 0) { x = rnd() * W; z = -1.5 - rnd() * 2.5; }
@@ -265,7 +281,7 @@ function buildCoastRocks(G, L, seaEdges, rnd, out) {
     for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) if (at(cc + a, rr + b) !== '~') near = true;
     if (near) continue;
     const s = 0.18 + rnd() * 0.3;
-    const g = rockGeo(rnd, '#8a857e');
+    const g = rockGeo(rnd, rc[2], !cave);
     place(g, x, SEA_Y - 0.08, z, rnd() * 6.28, s, s * 0.8, s * 1.1);
     out.push(g);
   }
@@ -273,14 +289,19 @@ function buildCoastRocks(G, L, seaEdges, rnd, out) {
 
 // ---------------------------------------------------------------------------
 // 塔基座：明顯的圓形石台
-function buildPlatform(x, z, rnd, out) {
+const PLATFORM_COLORS = {
+  island: ['#8c8274', '#ddd3c0', '#c3b7a1', '#a69a88'],
+  cave: ['#5f5953', '#a49b8e', '#8d8478', '#79716a'],
+};
+function buildPlatform(x, z, rnd, out, theme = 'island') {
+  const PC = PLATFORM_COLORS[theme] || PLATFORM_COLORS.island;
   const ry = rnd() * 6.28;
-  out.push(place(faceColored(new THREE.CylinderGeometry(0.45, 0.49, 0.09, 18), '#8c8274', 0.05, rnd), x, 0.045, z, ry));
-  out.push(place(faceColored(new THREE.CylinderGeometry(0.405, 0.43, 0.035, 18), '#ddd3c0', 0.035, rnd), x, 0.1025, z, ry));
-  out.push(place(faceColored(new THREE.CylinderGeometry(0.23, 0.23, 0.014, 16), '#c3b7a1', 0.03, rnd), x, PLATFORM_TOP + 0.003, z, ry));
+  out.push(place(faceColored(new THREE.CylinderGeometry(0.45, 0.49, 0.09, 18), PC[0], 0.05, rnd), x, 0.045, z, ry));
+  out.push(place(faceColored(new THREE.CylinderGeometry(0.405, 0.43, 0.035, 18), PC[1], 0.035, rnd), x, 0.1025, z, ry));
+  out.push(place(faceColored(new THREE.CylinderGeometry(0.23, 0.23, 0.014, 16), PC[2], 0.03, rnd), x, PLATFORM_TOP + 0.003, z, ry));
   for (let i = 0; i < 8; i++) {
     const a = ry + (i / 8) * Math.PI * 2;
-    const g = faceColored(new THREE.BoxGeometry(0.15, 0.07, 0.08), '#a69a88', 0.08, rnd);
+    const g = faceColored(new THREE.BoxGeometry(0.15, 0.07, 0.08), PC[3], 0.08, rnd);
     out.push(place(g, x + Math.cos(a) * 0.475, 0.035, z + Math.sin(a) * 0.475, -a + Math.PI / 2));
   }
 }
@@ -526,6 +547,175 @@ function paintGround(G, seed, PX) {
 }
 
 // ---------------------------------------------------------------------------
+// 洞窟地面貼圖（第二章）：石地、碎石、踩實的土路、石板開放地、黑色地洞出生點
+function paintGroundCave(G, seed, PX) {
+  const { W, H, at } = G;
+  const cw = W * PX, chh = H * PX;
+  const canvas = document.createElement('canvas');
+  canvas.width = cw; canvas.height = chh;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(cw, chh);
+  const d = img.data;
+  const kinds = new Uint8Array(W * H);
+  for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) kinds[r * W + c] = kindOf(at(c, r));
+  const kAt = (c, r) => (c < 0 || r < 0 || c >= W || r >= H) ? K_NONE : kinds[r * W + c];
+  const isPath = (k) => k === K_ROAD || k === K_SPAWN;
+  const inv = 1 / PX;
+  for (let py = 0; py < chh; py++) {
+    const gz = (py + 0.5) * inv;
+    for (let px = 0; px < cw; px++) {
+      const gx = (px + 0.5) * inv;
+      const kb = kAt(Math.floor(gx), Math.floor(gz));
+      let k = kb;
+      if (isPath(kb) || isGrassK(kb) || kb === K_SAND) {
+        // 土路與石地的交界抖一下，不要硬邊
+        const n1 = vnoise(gx * 2.4, gz * 2.4, seed + 1) - 0.5, n2 = vnoise(gx * 2.4 + 17.3, gz * 2.4 - 9.1, seed + 2) - 0.5;
+        const kw = kAt(Math.floor(gx + n1 * 0.42), Math.floor(gz + n2 * 0.42));
+        if ((isPath(kw) && !isPath(kb) && kb !== K_OPEN) || (!isPath(kw) && kw !== K_NONE && kw !== K_OPEN && isPath(kb))) k = kw;
+      }
+      const n = fbm(gx * 0.8, gz * 0.8, seed + 3, 3);
+      const m = vnoise(gx * 6.5, gz * 6.5, seed + 4);
+      const strata = vnoise(gx * 1.7 + gz * 0.6, gz * 3.2, seed + 6);
+      const fine = (hash2(px, py, seed) - 0.5) * 12;
+      let R, Gc, B;
+      if (k === K_SAND) {                 // 碎石地
+        const t = n * 0.6 + m * 0.4;
+        R = 124 - t * 26; Gc = 118 - t * 24; B = 110 - t * 22;
+        const h = vnoise(gx * 9, gz * 9, seed + 11);
+        if (h > 0.68) { const a = (h - 0.68) * 50; R += a; Gc += a; B += a * 0.9; } else if (h < 0.3) { const a = (0.3 - h) * 45; R -= a; Gc -= a; B -= a; }
+      } else if (k === K_ROAD || k === K_SPAWN) {   // 踩實的土路
+        const t = n * 0.55 + m * 0.45;
+        R = 150 - t * 30; Gc = 118 - t * 26; B = 86 - t * 22;
+        if (hash2(px, py, seed + 9) > 0.93) { R -= 26; Gc -= 22; B -= 16; }
+      } else if (k === K_OPEN) {          // 石板開放地
+        const t = n * 0.5 + m * 0.5;
+        R = 128 - t * 18; Gc = 122 - t * 16; B = 116 - t * 14;
+      } else {                            // 洞窟石地
+        const t = n * 0.6 + m * 0.25 + strata * 0.15;
+        R = 98 + t * 30; Gc = 90 + t * 26; B = 84 + t * 24;
+        if (k === K_BASE) { R -= 6; Gc -= 6; B -= 5; }
+        // 少量青綠苔蘚斑
+        const moss = vnoise(gx * 1.3 + 40, gz * 1.3 - 12, seed + 8);
+        if (moss > 0.72) { const a = (moss - 0.72) * 2.2; R -= 24 * a; Gc += 6 * a; B += 2 * a; }
+      }
+      const i = (py * cw + px) * 4;
+      d[i] = R + fine; d[i + 1] = Gc + fine; d[i + 2] = B + fine * 0.8; d[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+
+  const rnd = makeRng(seed + 77);
+  ctx.lineCap = 'round';
+  for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
+    const k = kinds[r * W + c];
+    const x0 = c * PX, y0 = r * PX;
+    const ch = at(c, r);
+    if (isGrassK(k)) {
+      // 石地裂縫
+      if (rnd() < 0.55) {
+        ctx.strokeStyle = 'rgba(30,26,24,0.5)'; ctx.lineWidth = Math.max(1, PX / 30);
+        let x = x0 + rnd() * PX, y = y0 + rnd() * PX;
+        ctx.beginPath(); ctx.moveTo(x, y);
+        for (let s = 0; s < 3; s++) { x += (rnd() - 0.5) * PX * 0.5; y += (rnd() - 0.5) * PX * 0.5; ctx.lineTo(x, y); }
+        ctx.stroke();
+      }
+      // 亮色小石屑
+      for (let i = 0; i < 6; i++) {
+        ctx.fillStyle = rnd() < 0.5 ? 'rgba(170,160,148,0.55)' : 'rgba(52,46,42,0.5)';
+        const s = Math.max(1, PX * (0.02 + rnd() * 0.03));
+        ctx.fillRect(x0 + rnd() * PX, y0 + rnd() * PX, s, s);
+      }
+    }
+    if (isRoadK(k)) {
+      for (let i = 0; i < 9; i++) {
+        const x = x0 + rnd() * PX, y = y0 + rnd() * PX, rr = PX * (0.025 + rnd() * 0.045);
+        ctx.fillStyle = rnd() < 0.5 ? 'rgba(200,184,160,0.75)' : 'rgba(80,62,46,0.6)';
+        ctx.beginPath(); ctx.ellipse(x, y, rr, rr * 0.75, rnd() * 3, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    if (k === K_SPAWN) {
+      // 黑色地洞（傳送門下方）
+      const g = ctx.createRadialGradient(x0 + PX / 2, y0 + PX / 2, 0, x0 + PX / 2, y0 + PX / 2, PX * 0.66);
+      g.addColorStop(0, 'rgba(8,4,14,0.92)'); g.addColorStop(0.45, 'rgba(30,14,44,0.6)'); g.addColorStop(1, 'rgba(40,20,60,0)');
+      ctx.fillStyle = g; ctx.fillRect(x0 - PX * 0.2, y0 - PX * 0.2, PX * 1.4, PX * 1.4);
+    }
+    if (k === K_OPEN) {
+      // 石板：四塊、縫線
+      const ins = PX * 0.05;
+      ctx.lineWidth = Math.max(1, PX / 22);
+      ctx.strokeStyle = 'rgba(48,44,40,0.55)';
+      ctx.beginPath();
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(x0 + ins, y0 + ins, PX - ins * 2, PX - ins * 2, PX * 0.1);
+      else ctx.rect(x0 + ins, y0 + ins, PX - ins * 2, PX - ins * 2);
+      ctx.stroke();
+      ctx.lineWidth = Math.max(1, PX / 40);
+      ctx.strokeStyle = 'rgba(48,44,40,0.3)';
+      const off = (rnd() - 0.5) * PX * 0.16;
+      ctx.beginPath(); ctx.moveTo(x0 + PX / 2 + off, y0 + ins); ctx.lineTo(x0 + PX / 2 + off, y0 + PX - ins); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,248,230,0.07)';
+      ctx.fillRect(x0 + PX * 0.12, y0 + PX * 0.12, PX * 0.32, PX * 0.32);
+    }
+    if (k === K_BASE) {
+      const g = ctx.createRadialGradient(x0 + PX / 2, y0 + PX / 2, PX * 0.36, x0 + PX / 2, y0 + PX / 2, PX * 0.66);
+      g.addColorStop(0, 'rgba(20,16,14,0.45)'); g.addColorStop(1, 'rgba(20,16,14,0)');
+      ctx.fillStyle = g; ctx.fillRect(x0 - PX * 0.2, y0 - PX * 0.2, PX * 1.4, PX * 1.4);
+    }
+    if (k === K_SAND) {
+      for (let i = 0; i < 8; i++) {
+        ctx.fillStyle = rnd() < 0.5 ? 'rgba(176,168,156,0.35)' : 'rgba(48,44,40,0.32)';
+        const s = Math.max(1, PX * (0.035 + rnd() * 0.04));
+        ctx.beginPath(); ctx.ellipse(x0 + rnd() * PX, y0 + rnd() * PX, s, s * 0.7, rnd() * 3, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    if (ch === 'U' || ch === 'C') {
+      // 發光蘑菇／水晶腳下：礦物色的地面
+      ctx.fillStyle = ch === 'U' ? 'rgba(60,150,140,0.28)' : 'rgba(120,90,200,0.25)';
+      ctx.beginPath(); ctx.arc(x0 + PX / 2, y0 + PX / 2, PX * 0.46, 0, Math.PI * 2); ctx.fill();
+    }
+    if (ch === 'X' || ch === 'R') {
+      ctx.fillStyle = 'rgba(28,24,22,0.35)';
+      ctx.beginPath(); ctx.ellipse(x0 + PX / 2, y0 + PX / 2, PX * 0.42, PX * 0.38, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    if (k === K_PLAZA) {
+      const cx = x0 + PX / 2, cy = y0 + PX / 2, R0 = PX * 0.56;
+      ctx.fillStyle = 'rgba(84,76,68,0.92)';
+      ctx.beginPath(); ctx.arc(cx, cy, R0, 0, Math.PI * 2); ctx.fill();
+      const rings = [[0, 1], [0.2, 7], [0.36, 12], [0.5, 17]];
+      for (const [rr, cnt] of rings) {
+        for (let i = 0; i < cnt; i++) {
+          const a = (i + (rr * 3) % 1) / cnt * Math.PI * 2;
+          const x = cx + Math.cos(a) * rr * PX, y = cy + Math.sin(a) * rr * PX;
+          const s = PX * (rr === 0 ? 0.12 : 0.075);
+          const l = 128 + Math.floor(rnd() * 36);
+          ctx.fillStyle = `rgb(${l},${l - 6},${l - 14})`;
+          ctx.beginPath(); ctx.ellipse(x, y, s, s * 0.82, a, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+    }
+  }
+  return canvas;
+}
+
+// 洞窟地面的碎石（合併進 props；礦車的鐵軌是 B 的 minecart 模型自帶）
+function buildCaveProps(G, rnd, out) {
+  const { W, H, at } = G;
+  const pebble = ['#6e6760', '#5d5751', '#7c746b'];
+  for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
+    const ch = at(c, r);
+    const x = c + 0.5, z = r + 0.5;
+    if (ch === '.' || ch === ',') {
+      const n = ch === ',' ? 3 + Math.floor(rnd() * 4) : (rnd() < 0.7 ? 0 : 1);
+      for (let i = 0; i < n; i++) {
+        const s = (ch === ',' ? 0.04 : 0.05) + rnd() * 0.07;
+        const g = rockGeo(rnd, pebble[Math.floor(rnd() * 3)], false);
+        const y = topOf(ch) + s * 0.2;
+        out.push(place(g, x + (rnd() - 0.5) * 0.8, y, z + (rnd() - 0.5) * 0.8, rnd() * 6.28, s * 1.2, s * 0.65, s));
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 海岸距離場：每格 R 像素，四周多留 M 格；值＝到陸地的距離（格）/ 4，0–1
 function computeShore(G, M = 8, R = 8) {
   const { W, H, at } = G;
@@ -596,10 +786,11 @@ export function buildTerrain(G, seed, opts = {}) {
   group.position.set(-W / 2, 0, -H / 2);
   const L = makeLattice(G, seed);
   const rnd = makeRng(seed + 1234);
+  const theme = opts.theme === 'cave' ? 'cave' : 'island';
 
   // 頂面
   const topGeo = buildTop(G, L);
-  const canvas = paintGround(G, seed, PX);
+  const canvas = theme === 'cave' ? paintGroundCave(G, seed, PX) : paintGround(G, seed, PX);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = opts.anisotropy || 4;
@@ -612,24 +803,25 @@ export function buildTerrain(G, seed, opts = {}) {
   group.add(top);
 
   // 崖壁＋道具
-  const { geo: wallGeo, seaEdges } = buildWalls(G, L, seed);
+  const { geo: wallGeo, seaEdges } = buildWalls(G, L, seed, theme);
   const props = [wallGeo];
-  buildCoastRocks(G, L, seaEdges, rnd, props);
+  buildCoastRocks(G, L, seaEdges, rnd, props, theme);
   for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
     const ch = at(c, r);
     const x = c + 0.5, z = r + 0.5;
-    if (ch === '#') buildPlatform(x, z, rnd, props);
+    if (ch === '#') buildPlatform(x, z, rnd, props, theme);
     else if (ch === 'B') buildDeck(G, c, r, rnd, props, false);
     else if (ch === 'D') buildDeck(G, c, r, rnd, props, true);
     else if (ch === '=' || ch === 'S') {
       const n = 2 + Math.floor(rnd() * 4);
       for (let i = 0; i < n; i++) {
         const s = 0.028 + rnd() * 0.04;
-        const g = rockGeo(rnd, rnd() < 0.5 ? '#b9ad9b' : '#9d8f7b', false);
+        const g = rockGeo(rnd, rnd() < 0.5 ? (theme === 'cave' ? '#a3927c' : '#b9ad9b') : (theme === 'cave' ? '#7a6a58' : '#9d8f7b'), false);
         props.push(place(g, x + (rnd() - 0.5) * 0.8, s * 0.15, z + (rnd() - 0.5) * 0.8, rnd() * 6.28, s * 1.2, s * 0.5, s));
       }
     }
   }
+  if (theme === 'cave') buildCaveProps(G, makeRng(seed + 4321), props);
   const propsGeo = mergeGeometries(props, false);
   for (const g of props) g.dispose();
   const propsMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
@@ -649,7 +841,7 @@ export function buildTerrain(G, seed, opts = {}) {
 
   const shore = computeShore(G);
   return {
-    group, shore, bounds, topMaterial: topMat,
+    group, shore, bounds, topMaterial: topMat, theme, propsMaterial: propsMat,
     dispose() {
       topGeo.dispose(); tex.dispose(); topMat.dispose();
       propsGeo.dispose(); propsMat.dispose();

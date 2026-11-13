@@ -1,6 +1,7 @@
 # 模擬核心 `js/sim/`（擁有者：A）
 
-純邏輯，不 import three、不碰 DOM/window，Node 也能跑。合約見 `架構.md` §5；這裡記錄實作細節、**新增**的欄位／事件／函式，以及平衡公式。
+純邏輯，不 import three、不碰 DOM/window，Node 也能跑。合約見 `架構.md` §5、`架構_第二章.md` §1–§2；這裡記錄實作細節、**新增**的欄位／事件／函式，以及平衡公式。
+第二章（v2.0）的內容集中在本檔最後的「第二章」一節。
 
 ## 檔案
 | 檔案 | 內容 |
@@ -8,16 +9,18 @@
 | `game.js` | `createGame`、全部指令、波次、技能、勝負；另匯出 `validateLevel`、`BAL` |
 | `combat.js` | 敵人生成、傷害、死亡、漏怪、狀態（緩速／凍結／定身／暈眩／燃燒／護盾）、敵人 special、移動 |
 | `towersim.js` | 塔數值（含天賦）、選目標、開火、投射物、連鎖閃電、樹靈脈衝、地帶（火焰／荊棘／流星標記） |
-| `hero.js` | 守燈騎士：BFS 移動、守備點、攔截、攻擊、死亡復活、升級、回血 |
+| `hero.js` | 三位英雄：BFS 移動（妖精直線飛）、守備點、攔截、近戰／遠程攻擊、死亡復活、升級、回血、英雄技能、聖燈衝鋒 |
+| `light.js` | 第二章光照：`state.lights`、`lightAt`、敵人 `lit`／`hidden`、塔 `lit`／`active`、水晶中繼 |
 | `map.js` | 解析 grid、8 連通 Dijkstra 流場（斜走不切角）、4 連通防封路檢查 |
 | `spatial.js` | 敵人空間分格（每幀計數排序重建，查詢不配置物件） |
 | `mods.js` | 天賦 id → 修正值 |
 | `balance.js` | 平衡常數（`BAL`） |
 | `rng.js` | 固定亂數（mulberry32） |
-| `testmaps.js` | 測試用小地圖、autoplay 備用關卡 |
+| `testmaps.js` | 測試用小地圖、autoplay 備用關卡；第二章洞窟測試圖（`MAP_CAVE_*`）與洞窟示範關（`DEMO_CAVE_LEVELS`） |
 
-測試：`/opt/anaconda3/envs/hermes3d/bin/node tests/test_sim.mjs`（37 項）。
-自動試玩：`/opt/anaconda3/envs/hermes3d/bin/node tests/autoplay.mjs [--level=7] [--strategy=balanced|lazy|archer|rush] [--seeds=3] [--log]`
+測試：`/opt/anaconda3/envs/hermes3d/bin/node tests/test_sim.mjs`（61 項）。
+自動試玩：`/opt/anaconda3/envs/hermes3d/bin/node tests/autoplay.mjs [--level=7|11,12] [--chapter=1|2] [--strategy=balanced|lazy|archer|rush] [--hero=knight|fairy|mage|all] [--seeds=3] [--log] [--leaks] [--demo-cave]`
+- `--hero=all` 會依序印三位英雄的表；`--leaks` 印每局的漏怪統計；`--demo-cave` 改跑 testmaps 的洞窟示範關。
 
 ## API
 ```js
@@ -121,4 +124,110 @@ const game = createGame(levelDef, { talents: [], seed: 1, enemyHpMul: 1 });
 - 其餘數值維持初版。2026-11-06 用當時的 levels.js 跑 autoplay（2 個 seed）：`lazy` 只過 1–3 關；`balanced`（無天賦）全過，但第 7、8 關只有 1 星、9、10 關 2–3 星；`balanced`＋天賦（星星預算 3×(關卡−1)）全部 2–3 星。
 
 ## autoplay 回傳
-`{ won, stars, lamp, wavesReached, waveCount, goldLeft, time, kills, leaked, towers, heroLevel, leakBy:{ 'w5:skeleton': 7, … }, log:[…] }`。`leakBy` 可看出哪一波、哪種怪漏最多，調關卡最好用。另匯出 `talentsForBudget(stars)`（依星星數挑天賦）。
+`autoplay(levelDef, { strategy, talents, seed, hpMul, hero, heroSkills = true, onEvent })`
+→ `{ won, stars, lamp, wavesReached, waveCount, goldLeft, time, kills, leaked, towers /*攻擊塔數*/, lanterns, hero, heroLevel, leakBy:{ 'w5:skeleton': 7, … }, log:[…] }`。`leakBy` 可看出哪一波、哪種怪漏最多，調關卡最好用。
+`heroSkills: false` 不放英雄技能；`onEvent(ev, game)` 每個事件呼叫一次（統計用）。
+另匯出 `talentsForBudget(stars, chapter = 1)`：第一章＝原本四條分支 1–4 層輪流點（和 v1 一樣）；第二章先點滿四條分支 1–4 層，再點燈火 1–4 層，最後第 5 層。命令列的「+天賦」用 3×(關卡−1) 顆星。
+
+---
+
+## 第二章（v2.0）：洞窟、光照、三位英雄
+
+### API 追加
+```js
+const game = createGame(levelDef, { talents, seed, hero: 'knight' | 'fairy' | 'mage' }); // 沒給或不認得＝knight
+game.castHeroSkill(skillId, x?, z?)  // → { ok, reason }
+game.lightAt(x, z)                   // → 0–1
+```
+- `castHeroSkill` 的 reason：`locked`（不是這位英雄的技能、未知 id、等級 < minLevel）、`dead`、`cooldown`（含衝鋒中）、`no-target`（要座標卻沒給；星塵連射射程內沒敵人；衝鋒終點附近沒有可站格）、`range`（離英雄超過 castRange）。**新增** `over`：遊戲已結束。檢查順序：locked → dead → cooldown → no-target → range。
+- `lightAt(x, z)`：不暗的關卡永遠 1。暗的關卡：在任一 `on` 光源半徑內＝1，半徑外 `LIGHT_EDGE`（0.75）格內線性漸暗到 0（給畫面；**lit 只看半徑內**）。
+- `buildOptions(c, r)`：在 `.` `,`（洞窟地面）且燈籠已解鎖時只回傳 `[燈籠]`；其他格照 `TOWER_ORDER`（6 種，含 prism、lantern）。第一章的 `.` 仍是完整清單、全部 not-buildable（燈籠 unlock 11）。
+- `canBuild`：燈籠可放 `# o . ,`，其他塔只能 `# o`；`o` 上的燈籠一樣做防封路檢查（`blocks-path`）。燈籠放在 `. ,` 上該格英雄不能走（英雄或守備點在那格會被移到最近可站格）。
+- `heroCanStand(c, r)`：妖精（flying）在地圖範圍內任何格都回傳 true。
+- `upgradeInfo`：燈籠 3 級後是 `{ kind: 'max' }`（沒有分支）；`next` 多了 `light`。天賦 `costMul` 也套用在 1→2、2→3 的升級費用（目前只有燈籠用到）。
+- `typeStats` / `towerStats` 多了 `kind`（'light'｜'attack'）、`light`、`needsLight`；`towerStats` 另有 `active`、`lit`、`out`。燈籠 `range`＝照亮半徑、`dps` 0；稜鏡塔 `dps`＝每道雷射每秒傷害 × 道數（不含 ramp）。
+- `validateLevel` 追加檢查：未知地圖字元（合法：`~.,=B#oSLTPRMHWFGDKCYUXQ`）、`chapter`（正整數）、`theme`（island｜cave）、`dark`（布林）、`env.time`（day｜dusk｜night｜cave）、`env.weather`（clear｜rain｜fog｜mist，含每波的 env）。
+
+### state 追加
+- `state.chapter`（預設 1）、`state.theme`（預設 'island'）、`state.dark`（預設 false）、`state.lights`（不暗的關卡是空陣列）。
+- `towers[i]`：`kind`（燈籠 'light'，其他 'attack'）、`light`（燈籠照亮半徑，含天賦）、`out`（被噴墨熄滅剩餘秒數）、`active`（稜鏡塔有光；其他塔永遠 true）、`lit`、`lasers: [{ targetId, power, x, y, z }]`（另有內部 `target`、`t`、`_light`…）。
+- `enemies[i]`：`lit`、`hidden`、`burrowed`、`segments`／`segMax`（不是巨蟲＝0）。
+- `hero`：`type`、`light`、`flying`、`attack`（sword｜bolt｜fireball）、`range`、`skills: { [id]: { cd, cdMax, unlocked, ready } }`；**新增** `casting`（施放技能後 0.6 秒內＝技能 id，給 `userData.update({ casting })`）、`dashing`（聖燈衝鋒中）。
+- `projectiles[i].kind` 新增 `fairyBolt`、`fireball`、`starBolt`（英雄的，`hero: true`）。稜鏡雷射不是投射物（看 `towers[i].lasers`）。
+- `zones[i].kind` 新增 `pollen`（花粉迷霧，有 `slow`、`reverse`）；火焰風暴用 `fire`（`skill: 'firestorm'`）。
+
+### 事件追加（欄位）
+| 事件 | 欄位 |
+|---|---|
+| `lanternOut` / `lanternOn` | `towerId, x, z` |
+| `ink` | `id`（蝙蝠）`, x, z` |
+| `burrow` / `emerge` | `id, x, z`（地鼠、地鼠王、巨蟲） |
+| `reveal` | `id, x, z`（幽靈從暗處進到光裡） |
+| `laserOn` / `laserOff` | `towerId`（塔從沒照射→照射、照射→沒照射） |
+| `segment` | `id, x, z, left`（一次打掉兩節＝兩個事件） |
+| `eat` | `towerId, x, z, id`（id＝巨蟲；被吞的燈籠已從 towers 移除） |
+| `heroSkill` | `skill, hero, x, z, radius, tx, tz`（衝鋒：x,z＝起點、tx,tz＝終點；其他技能 x,z＝tx,tz＝效果中心，旋風斬／星塵連射是英雄位置） |
+| `heroAttack`（擴充） | `targetId, attack, x, y, z`（目標位置）、另有 `fromX, fromZ`（英雄位置） |
+
+- `shoot.kind` 新增 `laser`（稜鏡塔鎖定新目標時發一次）。
+- `hit.kind` 新增 `laser`（每道雷射每 0.25 秒一次，damage 是累積值）、`whirl`、`charge`、`firestorm`、`icefall`、`fairyBolt`、`fireball`、`starBolt`。
+- `explode.kind` 新增 `fireball`（法師英雄火球）。`status.kind` 新增 `reverse`（花粉迷霧倒著走）。
+
+### 光照規則（只在 `dark` 的關卡）
+- 每 step 在敵人移動後、塔攻擊前重算 `state.lights`。光源：`lamp` 4.5、`lantern`（light×`lightMul`，`out>0` 時 off）、`hero`（HEROES.light×`heroLightMul`，死亡 off）、`mage`（法師塔 1.2）、`mushroom`（U，1.5）、`crystal`（C，2.0：格中心在任一亮著的光源半徑＋0.35 內才 on，可以一顆接一顆中繼；每 step 從頭算，不會互相點亮後自己維持）、`fire`（火焰地帶半徑＋0.5）、`meteor`（流星雨**落下時**起 3 秒，r 999）、`spell`（英雄技能 1.2 秒；法師火球爆開 0.4 秒 r 1.0）、`laser`（稜鏡雷射目標周圍 1.0）。光源 id 用獨立計數器。
+- 敵人在任一 on 光源半徑內＝`lit`。**塔只鎖定 lit 且不 hidden 的敵人**（選目標、連弩、連鎖閃電的跳躍、樹靈脈衝都是）。範圍傷害（投石砲爆炸、火焰地帶、聚焦貫穿）會波及暗處的敵人；英雄普攻、英雄技能、流星雨、冰封不看光（但英雄普攻不打 hidden 的）。
+- **laser 光源只照亮敵人**：不算進塔的 `lit`（避免稜鏡塔靠自己的雷射維持運作）、也不點亮水晶。
+- 稜鏡塔 `needsLight`：`active = lit`，沒光就關掉雷射（laserOff）。
+- 蓋／升級／賣塔後立即重算一次光照（prep 階段也看得到）。
+- 第一章「夜晚射程 −10%」只看 `env.time === 'night'`，洞窟（'cave'）不套用。
+
+### 塔
+- **燈籠**：不攻擊；`range`＝`light`（不受夜晚、熄光影響）；1–3 級、沒有分支。被噴墨時 `out = sec`，倒數完發 `lanternOn`。
+- **稜鏡塔**：每道雷射每秒 `damage` 點魔法傷害 ×（1 →`ramp`，`rampSec` 秒內線性上升；`power`＝進度）。鎖定後一直照到目標死亡、離開射程、hidden 或潛地；換目標 ramp 歸零。分光 `beams: 3`＝三個不同目標各一道。聚焦 `pierce`：塔→目標方向、長度＝射程、寬 0.4 的線段上其他敵人吃 ×0.6（`PRISM_PIERCE_MUL`）。
+### 敵人
+- **影子幽靈**（`shadow`）：暗的關卡裡不在光內＝`hidden`；hidden→看得見時發 `reveal`。
+- **地鼠**（`burrow: { trigger, dist, speed, cooldown }`）：每 0.2 秒檢查，離任一攻擊塔（不含燈籠）`trigger` 格內就鑽地；潛地中 `burrowed`＋`hidden`、沿路線以 `speed` 前進 `dist` 格（不受緩速）、所有傷害（`'true'` 除外）與控制無效、英雄擋不住（被擋時會放開）。冒出後冷卻 `cooldown` 秒。
+- **地鼠王**／**深淵巨蟲**（`burrow: { every, dist, speed }`）：出生 every×0.5 秒後第一次鑽地，冒出後每 `every` 秒再鑽。地鼠王潛地時暫停召喚。
+- **噴墨蝙蝠**（`ink: { radius, sec, cooldown }`）：半徑內有亮著的燈籠就噴墨，全部熄滅 `sec` 秒，之後冷卻。天賦 `inkImmune`＝不噴。
+- **深淵巨蟲**：`segments` 節，每節血量＝maxHp／節數；`eatLantern: { radius, every }`：出生 every×0.5 秒後開始，每 `every` 秒吞掉頭部 `radius` 內最近的一盞燈籠（沒有就每 0.5 秒再找）；潛地中不吞。被吞的燈籠如果在 `o` 上，路線恢復。
+- **飛行敵人 vs 妖精**：妖精在空中時，飛行敵人離她 1.0 格內就以 `atk` 每秒攻擊她（不停下）。
+
+### 英雄
+- **騎士**（sword）：第一章的近戰邏輯（攔截 blocks 隻、追打被擋的）。
+- **妖精**（flying、blocks 0）：直線飛、哪裡都能停；不攔人、地面敵人不會打她；站在守備點打射程內最前面（remain 最小）的敵人，含空中；`fairyBolt` 追蹤彈（魔法）。
+- **法師**（fireball、blocks 1、`air: false`）：攔 1 隻（被擋的走到他身邊打他）；站在守備點，優先打擋住他的那隻，否則打射程內最前面的地面敵人；`fireball` 落地爆開 `splash`（只炸地面）。
+- 遠程英雄每 0.2 秒重選目標，不追擊。
+- **英雄技能**：開局冷卻 0；`cdMax = cd × heroSkillCdMul`（寒冬之心 `skillCdMul` 只管流星雨／冰封）；`unlocked = hero.level >= minLevel`；`ready = unlocked && cd <= 0 && 活著 && 不在衝鋒`。傷害都 ×英雄等級倍率（1＋perLevel×(等級−1)）×`heroDamageMul`，擊殺算英雄經驗。
+  - 旋風斬：英雄周圍 radius 內地面敵人（物理）。
+  - 聖燈衝鋒：以 10 格/秒直線衝到目標點（可越過障礙；終點格不能站就用最近的可站格），沿路 radius 內地面敵人各一次：傷害、`knockback` 格撞退（往遠離燈的路線退，王 ×0.5）、暈眩（王 ×0.5）。**守備點不變**，衝完會走回去。
+  - 星塵連射：英雄 range 內看得見的敵人（含空中），bolts 發 `starBolt` 依序射出，分給最前面的不同目標（不夠就輪流）。
+  - 花粉迷霧：`pollen` 地帶 duration 秒；範圍內（含空中）緩速 `slow`；每隻第一次進來時倒著走 `reverse` 秒（王 ×0.5）：地面往流場上坡（離燈更遠的相鄰格）走、到出生點就停；飛行往遠離燈的方向。
+  - 火焰風暴：範圍內地面敵人立即魔法傷害＋留下 `fire` 地帶（dps＝burn.dps×等級倍率、ttl＝burn.sec）。
+  - 冰隕：範圍內地面敵人魔法傷害＋凍結 `freeze` 秒（王 ×0.5）。
+  - 規則：`air: false` 的英雄（騎士、法師）技能只打地面；妖精的技能含空中。
+- 每次施放都會發 `heroSkill`，暗的關卡另有 `spell` 光源。
+
+### 天賦（新 effect）
+`lightMul`（燈籠照亮半徑，塔用）、`costMul`（建造＋升級費用，塔用）、`inkImmune`（布林，任一為真就真）、`heroLightMul`、`heroSkillCdMul`、`waveGoldAdd`（每波清完額外金幣，沒有 reward 的波也給；**最後一波清完的同一幀就勝利，和第一章一樣不會再發錢**）。第 5 層照原規則（`…Mul` 相乘）。
+
+### 和合約不同或補充的地方
+- `castHeroSkill` 多一個 reason `over`；`hero` 多 `casting`、`dashing`；`heroAttack` 多 `fromX/fromZ`。
+- 流星雨的全場照亮從**落下**那一刻開始 3 秒（不是施放時）。
+- laser 光源不算塔的 lit（見上）。
+
+### 平衡（2026-11-14，A）
+- **第一章不變**：把騎士數值改回 v1（300 血、14 傷、擋 2）並關掉英雄技能時，autoplay 結果和 v1.3 逐格相同（同 seed、同關），確認規則核心的第一章邏輯沒動。
+- **英雄數值**（`heroes.js`，整合者初版 → 現在）：騎士 340/16 → 320 血、13 傷（擋 3 不變）；妖精 180 血、12 傷 ×1.4 次、射程 2.6 → 160 血、7 傷 ×1.2 次、射程 2.4；法師 220 血、20 傷 ×0.7 次、射程 2.3、splash 0.9、可打空中 → 200 血、9 傷 ×0.55 次、射程 2.1、splash 0.6、**不打空中**。
+  技能：旋風斬 60 傷／12 秒 → 30／16；聖燈衝鋒 80 傷、暈 1.5、20 秒 → 40、1.0、26；星塵連射 35×5／10 秒 → 16×5／15；花粉迷霧 緩速 0.5、倒走 2 秒、22 秒 → 0.4、1.2、28；火焰風暴 90 傷 r1.7、燒 15×4／16 秒 → 35 r1.5、5×3／22；冰隕 70 傷 r1.5、凍 2.5／24 秒 → 25 r1.3、1.3／30。
+- 方法：第 7–10 關（前面幾關大多 20 燈，看不出差別）、balanced、6 個 seed 的剩燈總和。v1 騎士（沒有技能）＝238。初版數值：騎士 347、妖精 383、法師 390（法師的火焰風暴一招就佔全部命中傷害 31%，還會清掉第 8 關的夜蝠群）。調整後：騎士 ≈ 249–278、妖精 ≈ 276、法師 ≈ 285–292（+15–20%，autoplay 幾乎每次冷卻好就放技能，真人會少一些）。結果很「混沌」：同設定差一個 seed 第 8 關可以差 15 燈，所以 ±30 以內視為一樣。
+- 第一章三位英雄 balanced（seed 1–3，剩燈）：
+
+  | 關 | v1 騎士 | 騎士 | 妖精 | 法師 |
+  |---|---|---|---|---|
+  | 7 | 11/11/12 | 12/10/12 | 14/10/13 | 8/8/12 |
+  | 8 | 2/4/3 | 8/3/6 | 10/13/11 | 8/12/15 |
+  | 9 | 12/6/17 | 20/20/4 | 18/13/20 | 19/20/16 |
+  | 10 | 5/13/11 | 12/20/4 | 7/12/3 | 11/7/12 |
+
+  1–6 關三位都和 v1 一樣（全勝、幾乎都 3 星）；lazy（英雄不動、不放技能）只過 1–3 關，同 v1。balanced＋天賦第 8 關：v1 15/15/12，騎士 16/17/16、妖精 5/12/1、法師 10/13/14。
+- 第二章的塔、敵人數值維持整合者初版（F 正在用 autoplay 調關卡），只改了英雄。

@@ -139,10 +139,13 @@ export function createView(world) {
         const obj = makeTower(t.type, Math.min(t.level, 3), t.branch || null);
         obj.position.set(wx(t.x), 0, wz(t.z));
         root.add(obj);
-        v = { obj, key, headYaw: oldYaw || 0, pop: v ? 0.35 : 0.45, seen: 0 };
+        v = { obj, key, headYaw: oldYaw || 0, pop: v ? 0.35 : 0.45, seen: 0, lit: undefined };
         towers.set(t.id, v);
       }
       v.seen = frame;
+      // v2.0：燈籠被噴墨熄滅、稜鏡塔在暗處 → 模型變暗
+      const on = t.kind === 'light' ? !(t.out > 0) : t.active !== false;
+      if (v.lit !== on) { v.lit = on; v.obj.userData.setLit?.(on); }
       const head = v.obj.userData.head;
       if (head) { v.headYaw = lerpAngle(v.headYaw, t.yaw || 0, Math.min(1, realDt * 14)); head.rotation.y = v.headYaw; }
       if (v.pop > 0) {
@@ -169,6 +172,9 @@ export function createView(world) {
       v.seen = frame;
       const x = lerp(v.px, e.x, alpha), y = lerp(v.py, e.y || 0, alpha), z = lerp(v.pz, e.z, alpha);
       v.obj.position.set(wx(x), y, wz(z));
+      // v2.0：影子幽靈在暗處、地鼠潛地時隱藏；深淵巨蟲節數
+      v.obj.visible = !e.hidden;
+      if (e.segments != null && v.seg !== e.segments) { v.seg = e.segments; v.obj.userData.setSegments?.(e.segments); }
       v.yaw = lerpAngle(v.yaw, e.yaw || 0, Math.min(1, realDt * 10));
       v.obj.rotation.y = v.yaw;
       v.obj.userData.update?.(simDt, {
@@ -178,7 +184,7 @@ export function createView(world) {
       // 血條：受傷或有護盾或王才顯示
       // 還沒被攻擊不顯示；第一次被打中（命中事件或血量減少）之後一直顯示
       if (!v.hurt && e.hp < e.maxHp) v.hurt = true;
-      const show = v.hurt;
+      const show = v.hurt && !e.hidden;
       v.bar.g.visible = show;
       if (show) {
         v.bar.g.position.set(wx(x), y + v.height + 0.18, wz(z));
@@ -224,22 +230,24 @@ export function createView(world) {
     // 英雄
     const hs = state.hero;
     if (hs) {
+      if (hero && hero.type !== (hs.type || 'knight')) { root.remove(hero.obj); root.remove(hero.bar.g); hero = null; }
       if (!hero) {
         const obj = makeHero(hs.type || 'knight');
         const bar = makeBar(0.7, 'hero');
         root.add(obj, bar.g);
-        hero = { obj, bar, px: hs.x, pz: hs.z, yaw: hs.yaw || 0, deadT: 0, height: obj.userData.height || 1 };
+        hero = { obj, bar, type: hs.type || 'knight', px: hs.x, pz: hs.z, yaw: hs.yaw || 0, deadT: 0, height: obj.userData.height || 1 };
       }
       const x = lerp(hero.px, hs.x, alpha), z = lerp(hero.pz, hs.z, alpha);
       const dead = hs.state === 'dead';
       hero.deadT = dead ? hero.deadT + realDt : 0;
       hero.obj.visible = !dead || hero.deadT < 1.2;
-      hero.obj.position.set(wx(x), 0, wz(z));
+      const hover = hero.obj.userData.hover || 0;   // v2.0：妖精原點在腳底，要浮在 hover 高度
+      hero.obj.position.set(wx(x), hover, wz(z));
       hero.yaw = lerpAngle(hero.yaw, hs.yaw || 0, Math.min(1, realDt * 12));
       hero.obj.rotation.y = hero.yaw;
-      hero.obj.userData.update?.(simDt, { moving: hs.state === 'move', attacking: hs.state === 'attack', dead });
+      hero.obj.userData.update?.(simDt, { moving: hs.state === 'move' || !!hs.dashing, attacking: hs.state === 'attack', dead, casting: !!hs.casting || !!hs.dashing });
       hero.bar.g.visible = !dead;
-      hero.bar.g.position.set(wx(x), hero.height + 0.22, wz(z));
+      hero.bar.g.position.set(wx(x), hero.height + hover + 0.22, wz(z));
       hero.bar.g.quaternion.copy(cam.quaternion);
       setBar(hero.bar, hs.hp / hs.maxHp, 0);
       selRing.position.set(wx(x), 0.04, wz(z));
@@ -264,6 +272,7 @@ export function createView(world) {
       case 'pulse': { const t = towers.get(ev.towerId); t?.obj.userData.fire?.(); break; }
       case 'hit': { const e = enemies.get(ev.targetId); if (e) { e.hurt = true; e.obj.userData.hit?.(); } break; }
       case 'heroAttack': hero?.obj.userData.attack?.(); break;
+      case 'heroSkill': hero?.obj.userData.cast?.(ev.skill); break;
       case 'upgrade': { const t = towers.get(ev.towerId); if (t) t.pop = 0.45; break; }
     }
   }

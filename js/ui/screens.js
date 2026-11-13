@@ -1,14 +1,15 @@
 // 標題、地圖、天賦、暫停、結算、設定、轉向提示（擁有者：D 介面）
 
-import { h, icon, ICON, STAR_POINTS as STAR_SVG } from './dom.js';
-import { renderChart } from './map.js';
+import { h, icon, ICON, STAR_POINTS as STAR_SVG, heroIcon } from './dom.js';
+import { renderChart, renderCave } from './map.js';
 import { TOWERS, TOWER_ORDER } from '../data/towers.js';
-import { SKILLS, SKILL_ORDER } from '../data/heroes.js';
+import { SKILLS, SKILL_ORDER, HEROES, HERO_ORDER, HERO_SKILLS } from '../data/heroes.js';
 import { TALENTS, TALENT_BRANCHES } from '../data/talents.js';
-import { starsEarned, starsSpent, starsAvailable, isLevelUnlocked, saveProgress } from './save.js';
+import { starsEarned, starsAvailable, isLevelUnlocked, isHeroUnlocked, chosenHero, saveProgress } from './save.js';
+import { CHAPTERS, chapterOf, chapterDef, chapterLevels, lastLevelOf, isChapterUnlocked } from './chapters.js';
 
-const TIME_TEXT = { day: ['☀️', '白天'], dusk: ['🌇', '黃昏'], night: ['🌙', '夜晚'] };
-const WEATHER_TEXT = { rain: ['🌧️', '雨天'], fog: ['🌫️', '起霧'] };
+const TIME_TEXT = { day: ['☀️', '白天'], dusk: ['🌇', '黃昏'], night: ['🌙', '夜晚'], cave: ['🕯️', '洞窟'] };
+const WEATHER_TEXT = { rain: ['🌧️', '雨天'], fog: ['🌫️', '起霧'], mist: ['🌫️', '瘴氣'] };
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
 
 const LANTERN_BIG = `<svg viewBox="0 0 120 150" aria-hidden="true">
@@ -50,13 +51,19 @@ export function createTitle(ui) {
 }
 
 // ================= 關卡地圖 =================
+// 分章：第一章海圖（小島）／第二章地底洞窟。第 n 章在第 n-1 章最後一關過關後開放；未開放時顯示鎖住的預覽。
 export function createMap(ui) {
   const starNum = h('b', null, '0');
   const starMax = h('small', null, '/30');
   const badge = h('span', { class: 'ui-badge is-hidden' }, '0');
   const chart = h('div', { class: 'map-chart' });
+  const titleIco = h('span', { class: 'map-title-ico', html: ICON.ship });
+  const titleTxt = h('h2', null, '航海圖');
+  const tipTxt = h('small', { class: 'map-tip' }, '選一座小島出航');
+  const tabs = h('div', { class: 'map-tabs', role: 'tablist', 'aria-label': '章節' });
   const head = h('header', { class: 'map-head' },
-    h('div', { class: 'map-title' }, h('span', { class: 'map-title-ico', html: ICON.ship }), h('h2', null, '航海圖'), h('small', { class: 'map-tip' }, '選一座小島出航')),
+    h('div', { class: 'map-title' }, titleIco, titleTxt, tipTxt),
+    tabs,
     h('div', { class: 'map-tools' },
       h('div', { class: 'ui-chip map-stars', title: '總星數' }, icon('star', 'is-gold'), starNum, starMax),
       h('button', { type: 'button', class: 'ui-btn teal map-talent', onclick: () => { ui.sound('click'); ui.go('talents'); } }, icon('tree'), h('span', null, '天賦'), badge),
@@ -67,31 +74,143 @@ export function createMap(ui) {
   const card = h('div', { class: 'lvl-card ui-panel', role: 'dialog' });
   const modal = h('div', { class: 'lvl-modal', onclick: e => { if (e.target === modal) closeInfo(); } }, card);
   const el = h('section', { class: 'ui-screen scr-map', 'aria-label': '關卡地圖' }, frame, modal);
-  let infoId = null;
+  let infoId = null, heroSel = null, heroEls = null;
+  let chapter = 1, seenMax = 0;
 
-  function render() {
+  // 已開放（而且有關卡）的最大章節
+  function maxOpenChapter(p, levels) {
+    let m = 1;
+    for (const c of CHAPTERS) if (c.id > 1 && chapterLevels(levels, c.id).length && isChapterUnlocked(p, c.id, levels)) m = Math.max(m, c.id);
+    return m;
+  }
+  // 目前該挑戰的關卡：第一個已解鎖但還沒過的
+  function targetLevel(p, levels) {
+    for (const lv of [...levels].sort((a, b) => a.id - b.id)) if (isLevelUnlocked(p, lv.id) && !(p.stars[lv.id] > 0)) return lv;
+    return null;
+  }
+
+  /** enter＝剛進入地圖畫面：自動選章（新開放的章 → 剛玩過的關卡那章 → 目前該挑戰的那章） */
+  function render(enter = false) {
     const p = ui.progress();
     const levels = ui.levels();
+    const open = maxOpenChapter(p, levels);
+    if (enter) {
+      const last = ui.lastLevel?.();
+      const tgt = targetLevel(p, levels);
+      if (seenMax && open > seenMax) chapter = open;
+      else if (last && levels.some(l => l.id === last.id)) chapter = chapterOf(last);
+      else chapter = tgt ? chapterOf(tgt) : open;
+    }
+    seenMax = Math.max(seenMax, open);
+    if (!CHAPTERS.some(c => c.id === chapter)) chapter = 1;
+
     const maxStars = levels.length * 3;
     starNum.textContent = starsEarned(p);
     starMax.textContent = '/' + maxStars;
     const avail = starsAvailable(p);
     badge.textContent = avail;
     badge.classList.toggle('is-hidden', avail <= 0);
-    chart.textContent = '';
-    chart.append(renderChart(levels, p, id => isLevelUnlocked(p, id), pick));
+    renderTabs(p, levels);
+    renderChapter(p, levels);
     if (infoId != null) openInfo(infoId, true);
+  }
+
+  function renderTabs(p, levels) {
+    tabs.textContent = '';
+    for (const c of CHAPTERS) {
+      const unlocked = isChapterUnlocked(p, c.id, levels);
+      const list = chapterLevels(levels, c.id);
+      let got = 0;
+      for (const lv of list) got += Math.min(3, p.stars[lv.id] || 0);
+      const b = h('button', {
+        type: 'button', role: 'tab', class: 'map-tab' + (c.id === chapter ? ' is-on' : '') + (unlocked ? '' : ' is-locked'),
+        'aria-selected': c.id === chapter ? 'true' : 'false', dataset: { chapter: c.id },
+        onclick: () => { if (chapter !== c.id) { ui.sound('click'); chapter = c.id; render(); } },
+      },
+        icon(unlocked ? (c.theme === 'cave' ? 'cave' : 'ship') : 'lock', 'map-tab-ico'),
+        h('span', { class: 'map-tab-name' }, c.name),
+        h('span', { class: 'map-tab-sub' }, c.theme === 'cave' ? '洞窟' : '小島'),
+        unlocked && list.length ? h('small', { class: 'map-tab-stars' }, `★${got}`) : null);
+      tabs.append(b);
+    }
+  }
+
+  function renderChapter(p, levels) {
+    const def = chapterDef(chapter);
+    const cave = def.theme === 'cave';
+    titleIco.innerHTML = cave ? ICON.cave : ICON.ship;
+    titleTxt.textContent = def.title;
+    tipTxt.textContent = def.tip || '';
+    frame.classList.toggle('is-cave', cave);
+    chart.classList.toggle('is-cave', cave);
+    chart.textContent = '';
+    const list = chapterLevels(levels, chapter);
+    const unlocked = isChapterUnlocked(p, chapter, levels);
+    const isUnl = id => isLevelUnlocked(p, id);
+    if (cave) chart.append(renderCave(list, p, isUnl, pick, { preview: !unlocked || !list.length }));
+    else chart.append(renderChart(list, p, isUnl, pick));
+    if (!unlocked || !list.length) {
+      const prevLast = levels.find(l => l.id === lastLevelOf(levels, chapter - 1));
+      chart.append(h('div', { class: 'map-lockpane' },
+        h('div', { class: 'mlp-box' },
+          h('span', { class: 'mlp-ico' }, icon(unlocked ? 'cave' : 'lock')),
+          h('b', { class: 'mlp-title' }, `${def.name}．${def.title}`),
+          h('span', { class: 'mlp-text' }, unlocked ? '新的關卡即將開放，敬請期待' : (def.lockText || `通過${chapterDef(chapter - 1).name}後開放`)),
+          !unlocked ? h('small', { class: 'mlp-sub' }, `通過第 ${lastLevelOf(levels, chapter - 1)} 關${prevLast ? `「${prevLast.name}」` : ''}就能進入`) : null)));
+    }
   }
 
   function pick(id) {
     const p = ui.progress();
     if (!isLevelUnlocked(p, id)) {
       ui.sound('error');
-      ui.toast(`先通過第 ${id - 1} 關才能前往這座島`);
+      ui.toast(`先通過第 ${id - 1} 關才能前往${chapter >= 2 ? '這裡' : '這座島'}`);
       return;
     }
     ui.sound('open');
     openInfo(id);
+  }
+
+  function heroCard(id, p) {
+    const d = HEROES[id];
+    const unlocked = isHeroUnlocked(p, id);
+    const skills = (d.skills || []).map(sid => HERO_SKILLS[sid]).filter(Boolean);
+    const b = h('button', {
+      type: 'button', role: 'radio', class: 'hp-card' + (unlocked ? '' : ' is-locked'), dataset: { hero: id },
+      'aria-checked': 'false', 'aria-label': unlocked ? `${d.name}（${d.role}）` : `${d.name}：通過第 ${d.unlockAfter} 關解鎖`,
+      onclick: () => selectHero(id, true),
+    },
+      h('span', { class: 'hp-face' }, icon(heroIcon(id))),
+      h('b', { class: 'hp-name' }, d.name),
+      h('span', { class: 'hp-role' }, d.role || ''),
+      h('span', { class: 'hp-tags' }, heroTraits(d).map(t => h('i', null, t))),
+      h('span', { class: 'hp-skills' }, skills.map(s => h('span', { class: 'hp-sk' }, h('em', null, s.icon || '✦'), h('span', null, s.name), (s.minLevel || 1) > 1 ? h('small', null, `Lv${s.minLevel}`) : null))),
+      unlocked ? h('span', { class: 'hp-check' }, icon('check')) : h('span', { class: 'hp-lock' }, icon('lock'), h('span', { class: 'hp-lock-txt' }, `通過第 ${d.unlockAfter} 關解鎖`)));
+    return b;
+  }
+
+  function selectHero(id, byUser) {
+    const p = ui.progress();
+    if (!HEROES[id]) return;
+    if (!isHeroUnlocked(p, id)) {
+      if (byUser) {
+        ui.sound('error');
+        ui.toast(`通過第 ${HEROES[id].unlockAfter} 關就能解鎖${HEROES[id].name}`);
+        const b = heroEls?.cards[id];
+        if (b?.animate) b.animate([{ translate: '0 0' }, { translate: '-5px 0' }, { translate: '5px 0' }, { translate: '-3px 0' }, { translate: '0 0' }], { duration: 300 });
+      }
+      return;
+    }
+    if (byUser && heroSel !== id) ui.sound('click');
+    heroSel = id;
+    if (byUser && p.hero !== id) { p.hero = id; saveProgress(p); }
+    if (!heroEls) return;
+    for (const k in heroEls.cards) {
+      const on = k === id;
+      heroEls.cards[k].classList.toggle('is-on', on);
+      heroEls.cards[k].setAttribute('aria-checked', on ? 'true' : 'false');
+    }
+    heroEls.desc.textContent = HEROES[id].desc || '';
   }
 
   function openInfo(id, keep = false) {
@@ -107,6 +226,7 @@ export function createMap(ui) {
     const times = [lv.env?.time || 'day'];
     for (const w of lv.waves || []) if (w.env?.time && w.env.time !== times[times.length - 1]) times.push(w.env.time);
     tags.push(h('span', { class: 'ui-tag' }, t[0] + ' ' + times.map(x => (TIME_TEXT[x] || t)[1]).join('→')));
+    if (lv.dark) tags.push(h('span', { class: 'ui-tag is-dark' }, '🌑 黑暗'));
     const wt = WEATHER_TEXT[lv.env?.weather];
     if (wt) tags.push(h('span', { class: 'ui-tag' }, wt[0] + ' ' + wt[1]));
     if (lv.waves?.length) tags.push(h('span', { class: 'ui-tag' }, icon('wave'), ` ${lv.waves.length} 波`));
@@ -115,24 +235,73 @@ export function createMap(ui) {
     for (const k of SKILL_ORDER) if (SKILLS[k].unlock === id) news.push(`${SKILLS[k].icon} ${SKILLS[k].name}`);
     const starRow = h('div', { class: 'lvl-stars' });
     for (let i = 0; i < 3; i++) starRow.append(icon('star', i < stars ? 'is-gold' : 'is-empty'));
+
+    // 英雄選擇（記住上次選擇：progress.hero；還沒解鎖就退回騎士）
+    if (!keep || !heroSel || !isHeroUnlocked(p, heroSel)) heroSel = chosenHero(p);
+    const cards = {};
+    for (const hid of HERO_ORDER) if (HEROES[hid]) cards[hid] = heroCard(hid, p);
+    const desc = h('p', { class: 'hp-desc' }, '');
+    heroEls = { cards, desc };
+    const heroBox = h('div', { class: 'hp' },
+      h('div', { class: 'hp-title' }, h('b', null, '選擇英雄'), h('small', null, '每關出發前都能換')),
+      h('div', { class: 'hp-cards', role: 'radiogroup', 'aria-label': '選擇英雄' }, Object.values(cards)),
+      desc);
+
+    card.className = 'lvl-card ui-panel has-heroes' + (chapterOf(lv) >= 2 ? ' is-cave' : '');
     card.textContent = '';
-    card.append(...[
+    card.append(
       h('button', { type: 'button', class: 'ui-x', 'aria-label': '關閉', onclick: () => { ui.sound('click'); closeInfo(); } }, icon('close')),
-      h('div', { class: 'lvl-num' }, `第 ${id} 關`),
-      h('h2', { class: 'lvl-name' }, lv.name),
-      h('div', { class: 'lvl-tags' }, tags),
-      h('p', { class: 'lvl-desc' }, lv.desc || ''),
-      news.length ? h('div', { class: 'lvl-new' }, h('b', null, '新登場'), news.join('　')) : null,
-      h('div', { class: 'lvl-rec' }, starRow, h('span', null, best != null ? `最佳燈光 ${best} / ${lampMax}` : '尚未挑戰')),
+      h('div', { class: 'lvl-info' }, ...[
+        h('div', { class: 'lvl-num' }, `第 ${id} 關`),
+        h('h2', { class: 'lvl-name' }, lv.name),
+        h('div', { class: 'lvl-tags' }, tags),
+        h('p', { class: 'lvl-desc' }, lv.desc || ''),
+        news.length ? h('div', { class: 'lvl-new' }, h('b', null, '新登場'), news.join('　')) : null,
+        h('div', { class: 'lvl-rec' }, starRow, h('span', null, best != null ? `最佳燈光 ${best} / ${lampMax}` : '尚未挑戰'))].filter(Boolean)),
+      heroBox,
       h('div', { class: 'lvl-btns' },
         btn('返回', 'wood', () => { ui.sound('click'); closeInfo(); }, 'back'),
-        btn('出發', 'gold go', () => { ui.sound('click'); closeInfo(); ui.call('onStartLevel', id); }, 'ship'))].filter(Boolean));
+        btn('出發', 'gold go', () => { ui.sound('click'); const hid = heroSel && isHeroUnlocked(ui.progress(), heroSel) ? heroSel : 'knight'; closeInfo(); ui.call('onStartLevel', id, hid); }, 'ship')));
+    selectHero(heroSel, false);
     modal.classList.add('is-open');
     if (!keep) card.querySelector('.go')?.focus({ preventScroll: true });
   }
-  function closeInfo() { infoId = null; modal.classList.remove('is-open'); }
+  function closeInfo() { infoId = null; heroEls = null; modal.classList.remove('is-open'); }
 
-  return { el, render, closeInfo, isInfoOpen: () => infoId != null, startInfo: () => { const b = card.querySelector('.go'); if (b && infoId != null) b.click(); } };
+  // 鍵盤：介紹卡開著時 1–3 選英雄；沒開時 ←／→ 換章
+  function key(code) {
+    if (infoId != null) {
+      const m = /^(Digit|Numpad)([1-9])$/.exec(code);
+      if (m) { const hid = HERO_ORDER[+m[2] - 1]; if (hid) selectHero(hid, true); return true; }
+      return false;
+    }
+    if (code === 'ArrowLeft' || code === 'ArrowRight') {
+      const i = CHAPTERS.findIndex(c => c.id === chapter);
+      const n = CHAPTERS[i + (code === 'ArrowRight' ? 1 : -1)];
+      if (n) { ui.sound('click'); chapter = n.id; render(); }
+      return true;
+    }
+    return false;
+  }
+
+  return {
+    el, render, closeInfo, key,
+    isInfoOpen: () => infoId != null,
+    startInfo: () => { const b = card.querySelector('.go'); if (b && infoId != null) b.click(); },
+    get chapter() { return chapter; },
+    setChapter: n => { if (CHAPTERS.some(c => c.id === n)) { chapter = n; render(); } },
+  };
+}
+
+// 英雄卡上的兩個特點標籤（從資料推出來，不寫死）
+function heroTraits(d) {
+  const t = [];
+  if ((d.blocks | 0) >= 2) t.push(`擋 ${d.blocks} 隻`);
+  if (d.flying) t.push('會飛');
+  if (d.splash) t.push('範圍攻擊');
+  if (d.air) t.push('可對空');
+  if (t.length < 2 && d.hp) t.push(`生命 ${d.hp}`);
+  return t.slice(0, 2);
 }
 
 // ================= 天賦 =================
@@ -166,8 +335,10 @@ export function createTalents(ui) {
     const avail = starsAvailable(p);
     availNum.textContent = avail;
     earnedTxt.textContent = `／共 ${starsEarned(p)}`;
+    earnedTxt.parentElement.title = `可用星數（已拿到 ${starsEarned(p)} 顆，全部關卡最多 ${ui.levels().length * 3} 顆）`;
     resetBtn.disabled = own.size === 0;
     cols.textContent = '';
+    cols.style.setProperty('--nb', TALENT_BRANCHES.length);
     for (const br of TALENT_BRANCHES) {
       const list = h('div', { class: 'tal-list' });
       const items = TALENTS.filter(t => t.branch === br.id).sort((a, b) => a.tier - b.tier);
@@ -249,7 +420,7 @@ export function createResult(ui) {
   const el = h('section', { class: 'ui-screen scr-result', 'aria-label': '結算' }, h('div', { class: 'res-rays' }), card);
   let timers = [];
 
-  function show({ won, stars = 0, lamp = 0, levelId, isLast }, lv) {
+  function show({ won, stars = 0, lamp = 0, levelId, isLast, unlocks }, lv) {
     timers.forEach(clearTimeout); timers = [];
     el.classList.toggle('is-won', !!won);
     el.classList.toggle('is-lost', !won);
@@ -261,23 +432,48 @@ export function createResult(ui) {
     const btns = [btn('回地圖', 'wood', () => { ui.sound('click'); ui.leaveResult('onQuitToMap'); }, 'map')];
     if (won && !isLast) btns.push(btn('重來', 'teal', () => { ui.sound('click'); ui.leaveResult('onRetry'); }, 'retry'));
     btns.push(primary);
+    // 剛解鎖的英雄／章節（main 算好傳進來）
+    const unl = won ? (Array.isArray(unlocks) ? unlocks : []).map(unlockRow).filter(Boolean) : [];
+    const ch = lv ? chapterOf(lv) : (levelId > 10 ? 2 : 1);
+    const finalText = ch >= 2 ? '恭喜！洞窟最深處也點亮了燈' : '恭喜！十座小島的燈都守住了';
+    el.classList.toggle('has-unlocks', unl.length > 0);
     card.textContent = '';
     card.append(...[
       h('div', { class: 'res-ribbon' }, h('span', null, won ? '勝利！' : '燈熄滅了…')),
       h('div', { class: 'res-sub' }, lv ? `第 ${levelId} 關．${lv.name}` : `第 ${levelId} 關`),
       h('div', { class: 'res-stars' }, starEls),
       h('div', { class: 'res-lamp' }, icon('lamp'), h('span', null, '燈光剩餘'), h('b', null, String(Math.max(0, Math.ceil(lamp)))), h('small', null, `/ ${lampMax}`)),
-      won && isLast ? h('div', { class: 'res-final' }, '恭喜！十座小島的燈都守住了') : null,
+      won && isLast ? h('div', { class: 'res-final' }, finalText) : null,
+      unl.length ? h('div', { class: 'res-unlocks' }, unl) : null,
       !won ? h('div', { class: 'res-tip' }, '試試先升級靠近燈的塔，或提早放技能') : h('div', { class: 'res-rule' }, '★ 過關　★★ 燈光 ≥ 10　★★★ 燈光 ≥ 18'),
       h('div', { class: 'res-btns' }, btns)].filter(Boolean));
     if (won) {
       for (let i = 0; i < Math.min(3, stars); i++) {
         timers.push(setTimeout(() => starEls[i].classList.add('is-lit'), 650 + i * 480));   // 星星音效由 main 的 audio.playStars 負責
       }
+      unl.forEach((u, i) => timers.push(setTimeout(() => u.classList.add('is-in'), 900 + Math.min(3, stars) * 480 + i * 260)));
     }
     return primary;
   }
   return { el, show, hide: () => { timers.forEach(clearTimeout); timers = []; } };
+}
+
+function unlockRow(u) {
+  if (!u) return null;
+  if (u.kind === 'hero') {
+    const d = HEROES[u.id];
+    if (!d) return null;
+    return h('div', { class: 'res-unlock is-hero', role: 'status', dataset: { hero: u.id } },
+      h('span', { class: 'ru-ico' }, icon(heroIcon(u.id))),
+      h('span', { class: 'ru-txt' }, h('b', null, `解鎖新英雄：${d.name}！`), h('small', null, `${d.role || ''}．出發前在關卡介紹卡上選擇`)));
+  }
+  if (u.kind === 'chapter') {
+    const c = chapterDef(Number(u.id));
+    return h('div', { class: 'res-unlock is-chapter', role: 'status' },
+      h('span', { class: 'ru-ico' }, icon('cave')),
+      h('span', { class: 'ru-txt' }, h('b', null, `${c.name}開放！`), h('small', null, `${c.title}在等著你，航海圖上可以切換章節`)));
+  }
+  return null;
 }
 
 // ================= 設定 =================
@@ -303,7 +499,7 @@ export function createSettings(ui) {
   const qRow = h('div', { class: 'set-row' }, h('span', { class: 'set-lbl' }, icon('sparkle'), '畫質'),
     h('div', { class: 'ui-seg', role: 'group' }, qHigh, qLow), h('small', { class: 'set-note' }, '低＝較省電'));
   const keys = h('div', { class: 'set-keys only-fine' },
-    ...[['空白', '暫停'], ['F', '速度'], ['N', '叫下一波'], ['Z', '流星雨'], ['X', '冰封'], ['1–4', '蓋塔'], ['U', '升級'], ['Del', '賣出'], ['Esc', '取消'], ['WASD', '移動鏡頭'], ['Q / E', '旋轉'], ['滾輪', '縮放']]
+    ...[['空白', '暫停'], ['F', '速度'], ['N', '叫下一波'], ['Z', '流星雨'], ['X', '冰封'], ['C / V', '英雄技能'], ['1–6', '蓋塔'], ['U', '升級'], ['Del', '賣出'], ['Esc', '取消'], ['WASD', '移動鏡頭'], ['Q / E', '旋轉'], ['滾輪', '縮放']]
       .map(([k, t]) => h('span', null, h('kbd', null, k), t)));
   const done = btn('完成', 'gold', () => { ui.sound('click'); close(); }, 'check');
   const creditsBtn = btn('製作名單', 'wood', () => { ui.sound('click'); showCredits(true); }, 'sparkle');

@@ -92,4 +92,40 @@ export const ICON = {
     <rect x="19" y="36" width="26" height="5.5" rx="2.5" fill="#1d2330"/>
     <path d="M24 46h16M26 50.5h12" stroke="#5b6271" stroke-width="2" stroke-linecap="round"/>
     <path d="M21 29c2-4 5-6 8-6.6" stroke="#fff" stroke-opacity=".7" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg>`,
+  // 森林妖精頭像：葉子頭髮、尖耳、發光翅膀
+  fairy: `<svg viewBox="0 0 64 64">
+    <path d="M28 35C19 19 6 17 6.5 28.5c.4 7.5 10 11 21.5 8.5z" fill="#c9f6ff" fill-opacity=".82" stroke="#62c6dc" stroke-width="1.6"/>
+    <path d="M36 35C45 19 58 17 57.5 28.5c-.4 7.5-10 11-21.5 8.5z" fill="#c9f6ff" fill-opacity=".82" stroke="#62c6dc" stroke-width="1.6"/>
+    <path d="M12 26c3-3 8-3 12 2M52 26c-3-3-8-3-12 2" stroke="#fff" stroke-opacity=".8" stroke-width="1.6" stroke-linecap="round" fill="none"/>
+    <path d="M20.5 38.5l-8.5-5 9.5 .2z" fill="#ffdcbc" stroke="#a8673d" stroke-width="1.4" stroke-linejoin="round"/>
+    <path d="M43.5 38.5l8.5-5-9.5 .2z" fill="#ffdcbc" stroke="#a8673d" stroke-width="1.4" stroke-linejoin="round"/>
+    <circle cx="32" cy="41" r="12.5" fill="#ffe3c8" stroke="#a8673d" stroke-width="1.8"/>
+    <path d="M19 41c-1.5-11 5.5-19 13-19s14.5 8 13 19c-2.5-5-6-7.5-9.5-7.8L32 37l-3.5-3.8C25 33.5 21.5 36 19 41z" fill="#5cc46a" stroke="#2c7a38" stroke-width="1.8" stroke-linejoin="round"/>
+    <path d="M32 22.5c1-6.5 6.5-10 12-9-2 5-6.5 8.5-12 9z" fill="#9be37f" stroke="#2c7a38" stroke-width="1.5" stroke-linejoin="round"/>
+    <ellipse cx="27.3" cy="42.6" rx="1.9" ry="2.5" fill="#24394a"/><ellipse cx="36.7" cy="42.6" rx="1.9" ry="2.5" fill="#24394a"/>
+    <circle cx="27.9" cy="41.8" r=".75" fill="#fff"/><circle cx="37.3" cy="41.8" r=".75" fill="#fff"/>
+    <circle cx="24" cy="46.5" r="2.2" fill="#ff8fa6" opacity=".45"/><circle cx="40" cy="46.5" r="2.2" fill="#ff8fa6" opacity=".45"/>
+    <path d="M29.5 47.5c1.6 1.4 3.4 1.4 5 0" stroke="#a8673d" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+    <path d="M51 8.5l1.3 3.2 3.2 1.3-3.2 1.3-1.3 3.2-1.3-3.2-3.2-1.3 3.2-1.3z" fill="#fff4a8"/>
+    <path d="M11 49l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z" fill="#fff4a8"/></svg>`,
+  // 星詠法師頭像：星星尖帽、白鬍子
+  mage: `<svg viewBox="0 0 64 64">
+    <circle cx="32" cy="38" r="11.5" fill="#ffe3c8" stroke="#8a5a3a" stroke-width="1.8"/>
+    <path d="M20.5 38.5c0 10.5 5.5 18 11.5 21.5 6-3.5 11.5-11 11.5-21.5-3 3.2-6.8 4.6-11.5 4.6s-8.5-1.4-11.5-4.6z" fill="#f4f2ff" stroke="#9893ba" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M25.5 43.5c2.5-2.2 4.5-2.4 6.5-.6 2-1.8 4-1.6 6.5.6" stroke="#bdb8da" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+    <path d="M26 37.5c1-1 2.6-1 3.6 0M34.4 37.5c1-1 2.6-1 3.6 0" stroke="#3a2a22" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+    <path d="M14 31.5C20.5 22 25 12 32.5 4.5c1.8 4 1.5 7 5 8.8 3 1.5 6.5.8 9 3-4.2-.2-6.6 1.2-6.4 4.4L45 31z" fill="#4c3aa6" stroke="#22185a" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M23 24.5c5 1.6 11 1.6 17.5-.2l1.2 3.4c-6.8 2-13.6 2-20.2.2z" fill="#f1c75c" stroke="#8a6118" stroke-width="1"/>
+    <ellipse cx="31" cy="31.6" rx="19.5" ry="4.6" fill="#5c49c0" stroke="#22185a" stroke-width="2"/>
+    <path d="M30 13.2l1 2.4 2.5.2-1.9 1.7.6 2.5-2.2-1.4-2.2 1.4.6-2.5-1.9-1.7 2.5-.2z" fill="#ffe27a"/>
+    <circle cx="36.5" cy="20" r="1.1" fill="#fff4b8"/><circle cx="24.5" cy="21.5" r=".9" fill="#fff4b8"/>
+    <path d="M51 41l1.2 2.8 2.8 1.2-2.8 1.2-1.2 2.8-1.2-2.8-2.8-1.2 2.8-1.2z" fill="#bfe6ff"/></svg>`,
+  // 第二章：洞窟入口與燈籠
+  cave: `<svg viewBox="0 0 24 24"><path d="M1.5 21.5C1.5 11.5 6 4 12 4s10.5 7.5 10.5 17.5z" fill="#5a5470" stroke="#2a2638" stroke-width="1.2" stroke-linejoin="round"/>
+    <path d="M5.5 7.6l1.4 2.6 1.1-3.4M15.8 6.4l1.3 3 1.3-2.4" stroke="#2a2638" stroke-width="1" fill="none" stroke-linejoin="round"/>
+    <path d="M5.8 21.5c0-6.4 2.8-11 6.2-11s6.2 4.6 6.2 11z" fill="#14121f"/>
+    <circle cx="12" cy="17.2" r="4" fill="#ffcf6a" opacity=".32"/><path d="M10.5 15.4h3l.3 3.8h-3.6z" fill="#ffd36a"/><path d="M11 15.4l.4-1h1.2l.4 1" fill="#e8a43a"/></svg>`,
 };
+
+/** 英雄頭像圖示名稱（沒有專屬圖時用騎士） */
+export const heroIcon = type => (ICON[type] ? type : 'knight');

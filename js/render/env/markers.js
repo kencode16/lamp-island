@@ -22,6 +22,12 @@ void main() {
     float dash = step(0.45, fract(ang * 18.0 / 6.2831853 + uTime * 0.12));
     float fill = 0.12 + 0.12 * smoothstep(0.55, 1.0, r);
     a = fill + edge * (0.55 + 0.45 * dash);
+  } else if (uStyle > 1.5) {
+    // 英雄技能可施放範圍：淡淡的內光＋旋轉的虛線外圈＋往外擴散的波紋
+    float dash = step(0.5, fract(ang * 28.0 / 6.2831853 - uTime * 0.25));
+    float fill = 0.05 + 0.13 * smoothstep(0.35, 1.0, r);
+    float wave = smoothstep(0.035, 0.0, abs(r - fract(uTime * 0.45))) * 0.35 * (1.0 - r);
+    a = fill + edge * (0.45 + 0.5 * dash) + wave;
   } else {
     float pulse = 0.5 + 0.5 * sin(uTime * 6.0);
     float inner = smoothstep(0.02, 0.0, abs(r - (0.35 + 0.05 * pulse)));
@@ -94,6 +100,7 @@ export function createMarkers(scene) {
   };
   const range = makeDisc(0, '#8fe3ff');
   const target = makeDisc(1, '#ff7a3a');
+  const cast = makeDisc(2, '#ffe08a');   // 英雄技能可施放範圍（第二章新增）
   const OK = new THREE.Color('#8fe3ff'), BAD = new THREE.Color('#ff4b4b');
 
   const cellMat = new THREE.ShaderMaterial({
@@ -145,6 +152,14 @@ export function createMarkers(scene) {
       target.visible = true;
     },
     hideTarget() { target.visible = false; },
+    showCast(x, z, radius) {
+      const w = api.world;
+      w.toWorld(x, z, 0.125, cast.position);
+      cast.scale.set(radius, 1, radius);
+      cast.material.uniforms.uRadius.value = radius;
+      cast.visible = true;
+    },
+    hideCast() { cast.visible = false; },
     showPaths(paths) {
       for (const m of pathGroup.children) m.geometry.dispose();
       pathGroup.clear();
@@ -165,6 +180,7 @@ export function createMarkers(scene) {
       time = (time + dt) % 1000;
       range.material.uniforms.uTime.value = time;
       target.material.uniforms.uTime.value = time;
+      cast.material.uniforms.uTime.value = time;
       cellMat.uniforms.uTime.value = time;
       pathMat.uniforms.uTime.value = time;
       pathFade += (pathGoal - pathFade) * Math.min(1, dt * 6);
@@ -172,7 +188,7 @@ export function createMarkers(scene) {
       pathGroup.visible = pathFade > 0.01;
     },
     clear() {
-      cell.visible = false; range.visible = false; target.visible = false;
+      cell.visible = false; range.visible = false; target.visible = false; cast.visible = false;
       api.showPaths(null); pathFade = 0;
     },
   };

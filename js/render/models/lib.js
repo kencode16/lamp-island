@@ -46,7 +46,7 @@ function tmat(t) {
  *   seed           擾動種子
  */
 export class Builder {
-  constructor(seed = 1) { this.geos = []; this.seed = seed * 7919 + 13; }
+  constructor(seed = 1) { this.geos = []; this.glowGeos = []; this.seed = seed * 7919 + 13; }
 
   add(src, color, t = {}, o = {}) {
     const g = src.index ? src.toNonIndexed() : src.clone();
@@ -86,7 +86,8 @@ export class Builder {
     g.setAttribute('fx', new THREE.BufferAttribute(fx, 2));
     g.applyMatrix4(tmat(t));
     g.computeVertexNormals();
-    this.geos.push(g);
+    // o.nd：這個零件放進「自發光（noDark）」那一份 geometry（partG 會做成另一個 mesh，材質 MAT.glow）
+    (o.nd ? this.glowGeos : this.geos).push(g);
     return this;
   }
   _tmp(geo, color, t, o) { this.add(geo, color, t, o); geo.dispose(); return this; }
@@ -118,11 +119,12 @@ export class Builder {
   /** 三角柱（屋頂）：寬 w（x）、高 h、長 d（z），底在 y=0 */
   prism(w, h, d, color, t, o) { return this.shape([[-w / 2, 0], [w / 2, 0], [0, h]], d, color, t, o); }
 
-  build() {
-    if (!this.geos.length) return null;
-    const m = mergeGeometries(this.geos, false);
-    for (const g of this.geos) g.dispose();
-    this.geos = [];
+  build() { const m = Builder.merge(this.geos); this.geos = []; return m; }
+  buildGlow() { const m = Builder.merge(this.glowGeos); this.glowGeos = []; return m; }
+  static merge(list) {
+    if (!list.length) return null;
+    const m = mergeGeometries(list, false);
+    for (const g of list) g.dispose();
     m.computeBoundingSphere(); m.computeBoundingBox();
     return m;
   }
@@ -137,12 +139,41 @@ export function cachedGeo(key, fn) {
 }
 export function geoCacheSize() { return GEO.size; }
 
-/** 依 key 建立（或取用快取的）頂點色 mesh；fn(b) 用 Builder 加零件 */
-export function part(key, fn, { receive = false, cast = true, seed = 1 } = {}) {
+/** 依 key 建立（或取用快取的）頂點色 mesh；fn(b) 用 Builder 加零件。mat 預設 MAT.vc */
+export function part(key, fn, { receive = false, cast = true, seed = 1, mat = MAT.vc } = {}) {
   const geo = cachedGeo(key, () => { const b = new Builder(seed); fn(b); return b.build(); });
-  const m = new THREE.Mesh(geo, MAT.vc);
+  const m = new THREE.Mesh(geo, mat);
   m.castShadow = cast; m.receiveShadow = receive; m.name = key;
   return m;
+}
+/**
+ * 自發光零件（眼睛、燈、水晶…）：獨立 mesh、材質 MAT.glow（userData.noDark = true，C 的黑暗效果會排除）。
+ * 零件本身照樣用 Builder 的 { glow } 控制亮度。預設不投影。
+ */
+export function glowPart(key, fn, { cast = false, seed = 1, mat = MAT.glow } = {}) {
+  const m = part(key, fn, { cast, seed, mat });
+  m.userData.glowPart = true;
+  return m;
+}
+
+/**
+ * 同一個 Builder 同時做「一般」與「自發光」兩份 geometry：零件選項加 { nd: true } 的放進自發光那份。
+ * 回傳 [一般 mesh, 自發光 mesh]（沒有自發光零件時只有一個），用 parent.add(...partG(...)) 加入。
+ */
+export function partG(key, fn, { receive = false, cast = true, seed = 1, mat = MAT.vc, glowMat = MAT.glow } = {}) {
+  const geo = cachedGeo(key, () => {
+    const b = new Builder(seed); fn(b);
+    const gg = b.buildGlow();
+    GEO.set(key + ':nd', gg);
+    return b.build();
+  });
+  const gGeo = GEO.get(key + ':nd');
+  const m = new THREE.Mesh(geo, mat);
+  m.castShadow = cast; m.receiveShadow = receive; m.name = key;
+  if (!gGeo) return [m];
+  const gm = new THREE.Mesh(gGeo, glowMat);
+  gm.castShadow = false; gm.name = key + ':nd'; gm.userData.glowPart = true;
+  return [m, gm];
 }
 
 /** 空的群組（樞紐點），可直接設定位置 */
@@ -152,20 +183,23 @@ export function pivot(x = 0, y = 0, z = 0, ...children) {
   return g;
 }
 
-/** 受擊閃白＋冰凍換材質（只換 MAT.vc 的 mesh；共用材質，不會每隻 new） */
+/** 受擊閃白＋冰凍換材質（只換 MAT.vc／MAT.ghost 的 mesh，發光零件不換；共用材質，不會每隻 new） */
+const SKIN_SETS = new Map([
+  [MAT.vc, [MAT.vc, MAT.flash, MAT.frozen]],
+  [MAT.ghost, [MAT.ghost, MAT.ghostFlash, MAT.ghostFrozen]],
+]);
 export function makeSkin(root) {
   const meshes = [];
-  root.traverse((o) => { if (o.isMesh && o.material === MAT.vc) meshes.push(o); });
+  root.traverse((o) => { if (o.isMesh && SKIN_SETS.has(o.material)) meshes.push([o, SKIN_SETS.get(o.material)]); });
   let state = 0, flashT = 0;
-  const mats = [MAT.vc, MAT.flash, MAT.frozen];
   return {
     hit() { flashT = 0.12; },
     update(dt, frozen) {
       if (flashT > 0) flashT -= dt;
       const s = flashT > 0 ? 1 : frozen ? 2 : 0;
-      if (s !== state) { state = s; for (const m of meshes) m.material = mats[s]; }
+      if (s !== state) { state = s; for (const [m, set] of meshes) m.material = set[s]; }
     },
-    reset() { flashT = 0; state = 0; for (const m of meshes) m.material = MAT.vc; },
+    reset() { flashT = 0; state = 0; for (const [m, set] of meshes) m.material = set[0]; },
   };
 }
 
@@ -185,4 +219,4 @@ export function countTris(obj) {
 export const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 export const lerp = (a, b, t) => a + (b - a) * t;
 /** 指數趨近（與幀率無關） */
-export const damp = (cur, target, rate, dt) => cur + (target - cur) * (1 - Math.exp(-rate * dt));
+export const damp = (cur, target, rate, dt) => (dt > 0 ? cur + (target - cur) * (1 - Math.exp(-rate * Math.min(dt, 0.5))) : cur);

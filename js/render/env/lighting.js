@@ -6,7 +6,7 @@ const V = (x, y, z) => new THREE.Vector3(x, y, z).normalize();
 
 // 顏色欄位（lerp 用）
 const COLOR_KEYS = ['sunColor', 'hemiSky', 'hemiGround', 'fogColor', 'skyTop', 'skyHorizon', 'seaDeep', 'seaShallow', 'foam'];
-const NUM_KEYS = ['sunInt', 'hemiInt', 'fogNear', 'fogFar', 'stars', 'night', 'rain', 'exposure', 'sunVis', 'spec', 'glow', 'shadow'];
+const NUM_KEYS = ['sunInt', 'hemiInt', 'fogNear', 'fogFar', 'stars', 'night', 'rain', 'exposure', 'sunVis', 'spec', 'glow', 'shadow', 'mist', 'cave'];
 
 export const TIME_PRESETS = {
   day: {
@@ -15,7 +15,7 @@ export const TIME_PRESETS = {
     fogColor: C('#b9e0f2'), fogNear: 1.35, fogFar: 3.6,
     skyTop: C('#4f97de'), skyHorizon: C('#c4e7f7'),
     seaDeep: C('#1c86b8'), seaShallow: C('#53d6c8'), foam: C('#ffffff'),
-    stars: 0, night: 0, rain: 0, exposure: 1.0, sunVis: 1, spec: 1.0, glow: 1.0, shadow: 1,
+    stars: 0, night: 0, rain: 0, exposure: 1.0, sunVis: 1, spec: 1.0, glow: 1.0, shadow: 1, mist: 0, cave: 0,
   },
   dusk: {
     sunDir: V(-0.85, 0.32, 0.25), sunColor: C('#ffb27a'), sunInt: 2.3,
@@ -23,7 +23,7 @@ export const TIME_PRESETS = {
     fogColor: C('#f0a787'), fogNear: 1.3, fogFar: 3.4,
     skyTop: C('#4a4c8c'), skyHorizon: C('#ffae7a'),
     seaDeep: C('#2c5a8c'), seaShallow: C('#5aa8b0'), foam: C('#ffe6d6'),
-    stars: 0.15, night: 0.45, rain: 0, exposure: 1.02, sunVis: 1, spec: 1.3, glow: 1.25, shadow: 1,
+    stars: 0.15, night: 0.45, rain: 0, exposure: 1.02, sunVis: 1, spec: 1.3, glow: 1.25, shadow: 1, mist: 0, cave: 0,
   },
   night: {
     sunDir: V(0.42, 0.78, 0.35), sunColor: C('#a9c2ff'), sunInt: 1.0,
@@ -31,7 +31,16 @@ export const TIME_PRESETS = {
     fogColor: C('#142344'), fogNear: 1.25, fogFar: 3.2,
     skyTop: C('#060b20'), skyHorizon: C('#1d3263'),
     seaDeep: C('#0c2a52'), seaShallow: C('#2a6a8c'), foam: C('#a8c8ec'),
-    stars: 1, night: 1, rain: 0, exposure: 1.08, sunVis: 0.5, spec: 0.8, glow: 1.6, shadow: 0.85,
+    stars: 1, night: 1, rain: 0, exposure: 1.08, sunVis: 0.5, spec: 0.8, glow: 1.6, shadow: 0.85, mist: 0, cave: 0,
+  },
+  // 第二章洞窟：沒有天空，頂光是冷色、整體偏暗但輪廓看得到；真正的「暗」由 darkness.js 的光照貼圖負責
+  cave: {
+    sunDir: V(-0.28, 0.9, 0.34), sunColor: C('#c9d2ff'), sunInt: 1.3,
+    hemiSky: C('#8a96c8'), hemiGround: C('#3a302c'), hemiInt: 0.85,
+    fogColor: C('#06080e'), fogNear: 1.45, fogFar: 3.1,
+    skyTop: C('#020306'), skyHorizon: C('#080b14'),
+    seaDeep: C('#03060b'), seaShallow: C('#0d1a24'), foam: C('#3c4c5e'),
+    stars: 0, night: 1, rain: 0, exposure: 1.06, sunVis: 0, spec: 0.55, glow: 1.5, shadow: 0.75, mist: 0, cave: 1,
   },
 };
 
@@ -53,6 +62,14 @@ export function envTarget(time = 'day', weather = 'clear') {
     p.fogNear *= 0.85; p.fogFar *= 0.8;
     p.rain = 1; p.sunVis = 0; p.stars = 0; p.spec *= 0.3; p.shadow *= 0.55;
     p.exposure *= 0.96;
+  } else if (weather === 'mist') {
+    // 瘴氣（第二章）：紫綠色低霧＋地面漂浮的霧團（weather.js 的 mist）
+    const haze = C('#1c1628');
+    p.fogColor.lerp(haze, 0.7);
+    p.skyHorizon.lerp(haze, 0.6);
+    p.fogNear *= 0.8; p.fogFar *= 0.85;
+    p.hemiSky.lerp(C('#8c7ab0'), 0.35);
+    p.mist = 1;
   } else if (weather === 'fog') {
     const haze = time === 'night' ? C('#33405e') : time === 'dusk' ? C('#d8a898') : C('#dfe7ea');
     p.fogColor.lerp(haze, 0.8);

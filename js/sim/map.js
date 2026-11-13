@@ -1,9 +1,13 @@
-// 地圖解析與尋路（純邏輯）。字元表見 架構.md §3。
+// 地圖解析與尋路（純邏輯）。字元表見 架構.md §3、架構_第二章.md §1。
 // 格 (c, r) 的索引 i = r*W + c；中心 (c+0.5, r+0.5)。
 
 export const ENEMY_WALK = '=BoSL';      // 敵人可走（o 上有塔就不可走）
 export const BUILDABLE = '#o';          // 可蓋塔
+export const LANTERN_OK = '#o.,';       // 燈籠可放（o 上的燈籠也擋路；. , 上的燈籠擋英雄）
 export const HERO_LAND = '.,=BoS';      // 英雄可走（不含海、裝飾、塔基座、燈、有塔的格）
+// 所有合法字元（第一章＋第二章：U 發光蘑菇、C 水晶、X 石筍、Q 礦車）
+export const KNOWN_CHARS = '~.,=B#oSLTPRMHWFGDKCYUXQ';
+export const THEMES = ['island', 'cave'];
 
 const SQRT2 = Math.SQRT2;
 // 先 4 個正交方向，再 4 個斜向（平手時偏好正交）
@@ -19,8 +23,8 @@ export function parseMap(levelDef) {
   }
   const N = W * H;
   const chars = new Array(N);
-  const walkBase = new Uint8Array(N), buildable = new Uint8Array(N), heroBase = new Uint8Array(N);
-  const spawns = [];
+  const walkBase = new Uint8Array(N), buildable = new Uint8Array(N), heroBase = new Uint8Array(N), lanternOk = new Uint8Array(N);
+  const spawns = [], mushrooms = [], crystals = [];
   let lamp = -1;
   for (let r = 0; r < H; r++) {
     for (let c = 0; c < W; c++) {
@@ -29,6 +33,9 @@ export function parseMap(levelDef) {
       if (ENEMY_WALK.includes(ch)) walkBase[i] = 1;
       if (BUILDABLE.includes(ch)) buildable[i] = 1;
       if (HERO_LAND.includes(ch)) heroBase[i] = 1;
+      if (LANTERN_OK.includes(ch)) lanternOk[i] = 1;
+      if (ch === 'U') mushrooms.push({ c, r, x: c + 0.5, z: r + 0.5, i });
+      if (ch === 'C') crystals.push({ c, r, x: c + 0.5, z: r + 0.5, i });
       if (ch === 'S') spawns.push({ index: spawns.length, c, r, x: c + 0.5, z: r + 0.5, i });
       if (ch === 'L') {
         if (lamp >= 0) throw new Error('地圖有超過 1 個守護燈 L');
@@ -39,7 +46,14 @@ export function parseMap(levelDef) {
   if (lamp < 0) throw new Error('地圖沒有守護燈 L');
   if (spawns.length === 0) throw new Error('地圖沒有出生點 S');
   const lc = lamp % W, lr = (lamp - lc) / W;
-  return { W, H, N, grid: grid.slice(), chars, walkBase, buildable, heroBase, spawns, lamp, lampC: lc, lampR: lr, lampX: lc + 0.5, lampZ: lr + 0.5 };
+  // 第二章欄位：沒有＝第一章（chapter 1、island、不暗）
+  const chapter = Number.isFinite(levelDef.chapter) ? levelDef.chapter : 1;
+  const theme = typeof levelDef.theme === 'string' ? levelDef.theme : 'island';
+  const dark = levelDef.dark === true;
+  return {
+    W, H, N, grid: grid.slice(), chars, walkBase, buildable, heroBase, lanternOk, spawns, lamp, lampC: lc, lampR: lr, lampX: lc + 0.5, lampZ: lr + 0.5,
+    chapter, theme, dark, mushrooms, crystals,
+  };
 }
 
 export function cellAt(map, x, z) {

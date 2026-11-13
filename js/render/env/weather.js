@@ -135,3 +135,79 @@ export function createRain(scene, count = 1600) {
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// 瘴氣（第二章 weather 'mist'）：貼地漂浮的紫綠色霧團。用黑暗貼圖決定亮度：光裡的霧被照亮、暗處的霧只剩淡淡輪廓。
+const MIST_VERT = /* glsl */`
+uniform float uTime, uScale;
+uniform vec4 uArea;   // minX, minZ, sizeX, sizeZ（世界座標）
+attribute vec4 aSeed; // x,z（0–1）、大小、相位
+varying float vA;
+varying vec3 vTint;
+__DK__
+void main() {
+  vec2 drift = vec2(uTime * (0.05 + aSeed.w * 0.05), sin(uTime * 0.13 + aSeed.w * 20.0) * 0.6);
+  vec2 xz = uArea.xy + fract(aSeed.xy + drift / uArea.zw) * uArea.zw;
+  vec3 p = vec3(xz.x, 0.25 + aSeed.w * 0.45 + 0.08 * sin(uTime * 0.7 + aSeed.w * 9.0), xz.y);
+  vec4 mv = viewMatrix * vec4(p, 1.0);
+  gl_PointSize = (1.4 + aSeed.z * 2.2) * uScale / max(0.1, -mv.z);
+  // 邊緣（循環接縫）淡出
+  vec2 e = min(fract(aSeed.xy + drift / uArea.zw), 1.0 - fract(aSeed.xy + drift / uArea.zw));
+  vA = smoothstep(0.0, 0.08, min(e.x, e.y));
+  vTint = vec3(1.0);
+  if (uDkOn > 0.0) {
+    vec4 L = dkLit(xz);
+    vTint = mix(vec3(1.0), vec3(0.14) + (vec3(1.0) + uDkWarm * L.g + uDkCool * L.b) * L.r, uDkOn);
+  }
+  gl_Position = projectionMatrix * mv;
+}`;
+const MIST_FRAG = /* glsl */`
+uniform vec3 uColor;
+uniform float uOpacity;
+varying float vA;
+varying vec3 vTint;
+void main() {
+  vec2 p = gl_PointCoord * 2.0 - 1.0;
+  float d = dot(p, p);
+  if (d > 1.0) discard;
+  float a = pow(1.0 - d, 2.0) * vA * uOpacity;
+  if (a < 0.003) discard;
+  gl_FragColor = vec4(uColor * vTint, a);
+  #include <colorspace_fragment>
+}`;
+
+export function createMist(scene, dkUniforms, dkGlsl, count = 90) {
+  const g = new THREE.BufferGeometry();
+  const seed = new Float32Array(count * 4);
+  for (let i = 0; i < count; i++) { seed[i * 4] = Math.random(); seed[i * 4 + 1] = Math.random(); seed[i * 4 + 2] = Math.random(); seed[i * 4 + 3] = Math.random(); }
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+  g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 4));
+  const uniforms = {
+    uTime: { value: 0 }, uScale: { value: 800 }, uArea: { value: new THREE.Vector4(-10, -8, 20, 16) },
+    uColor: { value: new THREE.Color('#7a6a9c') }, uOpacity: { value: 0 },
+  };
+  for (const k of Object.keys(dkUniforms)) uniforms[k] = dkUniforms[k];
+  const mat = new THREE.ShaderMaterial({
+    uniforms, vertexShader: MIST_VERT.replace('__DK__', dkGlsl), fragmentShader: MIST_FRAG,
+    transparent: true, depthWrite: false, toneMapped: false,
+  });
+  const points = new THREE.Points(g, mat);
+  points.frustumCulled = false;
+  points.renderOrder = 4;
+  points.visible = false;
+  points.name = 'mist';
+  scene.add(points);
+  let amount = 0;
+  return {
+    points,
+    setArea(minX, minZ, sizeX, sizeZ) { uniforms.uArea.value.set(minX, minZ, sizeX, sizeZ); },
+    setAmount(a) { amount = a; },
+    update(dt, pixelScale) {
+      points.visible = amount > 0.01;
+      if (!points.visible) return;
+      uniforms.uTime.value = (uniforms.uTime.value + dt) % 2000;
+      uniforms.uScale.value = pixelScale;
+      uniforms.uOpacity.value = 0.27 * amount;
+    },
+  };
+}

@@ -4,14 +4,16 @@ import * as MODELS from './models.js';
 import * as PALETTE from './palette.js';
 import { createCameraRig } from './camera.js';
 import { makeRng, hashString } from './env/rng.js';
-import { buildTerrain, makeGridInfo, surfaceOf, isLand, DECOR_KIND, WALKABLE, SEA_Y } from './env/terrain.js';
+import { buildTerrain, makeGridInfo, surfaceOf, isLand, DECOR_KIND, CAVE_DECOR_KIND, WALKABLE, SEA_Y } from './env/terrain.js';
 import { createWater } from './env/water.js';
 import { createSky } from './env/sky.js';
 import { envTarget, cloneParams, lerpParams } from './env/lighting.js';
-import { createRain } from './env/weather.js';
+import { createRain, createMist } from './env/weather.js';
 import { createMarkers } from './env/markers.js';
 import { createGlows } from './env/glows.js';
 import { mergeStatic } from './env/merge.js';
+import { createDarkness, DK_GLSL_SAMPLE } from './env/darkness.js';
+import { buildCaveWalls, makeCaveDecorFallback } from './env/cave.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -52,8 +54,10 @@ export function createWorld(container, opts = {}) {
   scene.add(sun.target);
 
   const sky = createSky(scene);
-  const water = createWater(scene);
+  const darkness = createDarkness();            // 第二章黑暗（光照貼圖＋材質補丁）
+  const water = createWater(scene, darkness.uniforms);
   const rain = createRain(scene, opts.rainCount || 1600);
+  const mist = createMist(scene, darkness.uniforms, DK_GLSL_SAMPLE);
   const markers = createMarkers(scene);
   const glows = createGlows(scene);
   const levelRoot = new THREE.Group();
@@ -65,7 +69,9 @@ export function createWorld(container, opts = {}) {
 
   const world = {
     renderer, scene, camera, entities, levelRoot,
-    sun, hemi, sky, water, rain, markers, glows,
+    sun, hemi, sky, water, rain, markers, glows, mist, darkness,
+    darkUniforms: darkness.uniforms,
+    theme: 'island',
     cam: null,
     onTap: null, onHover: null,
     W: 0, H: 0, level: null,
@@ -140,6 +146,7 @@ export function createWorld(container, opts = {}) {
     sky.applyEnv(p);
     water.applyEnv(p);
     rain.setAmount(p.rain);
+    mist.setAmount(p.mist || 0);
     if (typeof PALETTE.setGlowStrength === 'function') PALETTE.setGlowStrength(p.glow);
   }
   applyEnv(envCur);
@@ -163,22 +170,35 @@ export function createWorld(container, opts = {}) {
   world.showPaths = (paths) => markers.showPaths(paths);
   world.showTargetCircle = (x, z, radius) => markers.showTarget(x, z, radius);
   world.hideTargetCircle = () => markers.hideTarget();
+  /** 英雄技能瞄準時，英雄周圍的可施放範圍（每幀呼叫也沒關係） */
+  world.showCastRange = (x, z, radius) => markers.showCast(x, z, radius);
+  world.hideCastRange = () => markers.hideCast();
 
   // ---------------------------------------------------------------- 關卡
   let terrain = null;
+  let caveWalls = null;
   let dynamicObjs = [];   // 需要每幀 update 的裝飾
+  let crystalObjs = new Map();   // 第二章：格子 key → 洞窟水晶（userData.setLit 依 state.lights 的 crystal 光源）
   let decorLights = [];   // { light, base }
   let lampFlicker = 0, lampFlickerK = 1;
+  let boundState = null;  // world.bindGame(state)
+  let levelDark = false;  // levelDef.dark（還沒 bindGame 前用它）
+  const darkRoots = [levelRoot, entities];
 
   world.clearLevel = function () {
     levelRoot.traverse((o) => { if (o.isMesh && o.userData.mergedGeometry) o.geometry.dispose(); });
     levelRoot.clear();
     if (terrain) { terrain.dispose(); terrain = null; }
+    if (caveWalls) { caveWalls.dispose(); caveWalls = null; }
     glows.clear();
     markers.clear();
     water.setShore(null);
     world.lamp = null; world.gates = []; world.level = null;
-    dynamicObjs = []; decorLights = [];
+    dynamicObjs = []; decorLights = []; crystalObjs = new Map();
+    // 自動解除 bindGame
+    boundState = null; levelDark = false;
+    darkness.unbind(); darkness.clear(); darkness.update(0, true);
+    world.theme = 'island';
   };
 
   function yawToward(G, c, r, pred) {
@@ -194,10 +214,18 @@ export function createWorld(container, opts = {}) {
     world.W = W; world.H = H;
     world.level = { W, H, at, grid: G.rows, def: levelDef };
     const seed = hashString(String(levelDef.id ?? '') + '|' + G.rows.join('\n'));
+    const cave = levelDef.theme === 'cave';
+    world.theme = cave ? 'cave' : 'island';
 
-    terrain = buildTerrain(G, seed, { anisotropy: Math.min(8, renderer.capabilities.getMaxAnisotropy()) });
+    terrain = buildTerrain(G, seed, { anisotropy: Math.min(8, renderer.capabilities.getMaxAnisotropy()), theme: world.theme });
     levelRoot.add(terrain.group);
     water.setShore(terrain.shore);
+    if (cave) {
+      caveWalls = safe(() => buildCaveWalls(G, seed), 'buildCaveWalls');
+      if (caveWalls) levelRoot.add(caveWalls.group);
+    }
+    darkness.setMap(W, H);
+    mist.setArea(-W / 2 - 1, -H / 2 - 1, W + 2, H + 2);
 
     // ---- 模型
     const rng = makeRng(seed ^ 0x9e3779b9);
@@ -215,7 +243,7 @@ export function createWorld(container, opts = {}) {
         lamp = safe(() => MODELS.makeLamp(), 'makeLamp');
         if (lamp) { lamp.position.set(x, 0, z); decorGroup.add(lamp); }
       } else if (ch === 'S') {
-        const gate = safe(() => MODELS.makeSpawnGate(), 'makeSpawnGate');
+        const gate = safe(() => (cave ? MODELS.makeSpawnGate('cave') : MODELS.makeSpawnGate()), 'makeSpawnGate');
         if (gate) {
           const yaw = yawToward(G, c, r, (n) => n === '=' || n === 'B' || n === 'o' || n === 'L')
             ?? yawToward(G, c, r, (n) => isLand(n)) ?? 0;
@@ -225,8 +253,8 @@ export function createWorld(container, opts = {}) {
           gates.push(gate);
         }
       } else if (DECOR_KIND[ch]) {
-        const kind = DECOR_KIND[ch];
-        const obj = safe(() => MODELS.makeDecor(kind, rng), `makeDecor(${kind})`);
+        const kind = (cave && CAVE_DECOR_KIND[ch]) || DECOR_KIND[ch];
+        const obj = safe(() => makeDecorFor(kind, rng, cave), `makeDecor(${kind})`);
         if (!obj) continue;
         let yaw = rng() * Math.PI * 2, jx = (rng() - 0.5) * 0.14, jz = (rng() - 0.5) * 0.14;
         if (kind === 'house') { yaw = yawToward(G, c, r, (n) => WALKABLE.has(n)) ?? 0; jx = jz = 0; }
@@ -237,11 +265,26 @@ export function createWorld(container, opts = {}) {
         else if (kind === 'windmill') { yaw = (rng() - 0.5) * 0.7; jx = jz = 0; }
         else if (kind === 'grave') { yaw = (rng() - 0.5) * 0.5; }
         else if (kind === 'lamppost') { jx *= 0.5; jz *= 0.5; }
+        else if (kind === 'minecart') {
+          const vert = (at(c, r - 1) === 'Q' || at(c, r + 1) === 'Q') && !(at(c - 1, r) === 'Q' || at(c + 1, r) === 'Q');
+          yaw = vert ? Math.PI / 2 : 0; jx = jz = 0;
+        }
         obj.position.set(x + jx, surfaceOf(ch), z + jz);
         obj.rotation.y = yaw;
         decorGroup.add(obj);
         decor.push({ obj, ch, kind, c, r });
-      } else if (ch === '.') {
+      } else if (ch === '.' && cave) {
+        // 洞窟地面：B 的碎石（grassTuft 的洞窟版）與小白菇芽（flower 的洞窟版），比草地稀疏
+        const roll = rng();
+        if (roll < 0.45) {
+          const o = safe(() => MODELS.makeDecor(roll < 0.36 ? 'grassTuft' : 'flower', rng, 'cave'), 'makeDecor(cave small)');
+          if (o) {
+            o.position.set(x + (rng() - 0.5) * 0.7, 0, z + (rng() - 0.5) * 0.7);
+            o.rotation.y = rng() * Math.PI * 2;
+            decorGroup.add(o); small.push(o);
+          }
+        }
+      } else if (ch === '.' && !cave) {
         // 草地隨機長小草叢與花
         const coast = !isLand(at(c - 1, r)) || !isLand(at(c + 1, r)) || !isLand(at(c, r - 1)) || !isLand(at(c, r + 1));
         const spread = coast ? 0.55 : 0.78;
@@ -268,11 +311,17 @@ export function createWorld(container, opts = {}) {
 
     // ---- 夜晚光暈（要在合併前找，合併後就分不出是哪個物件）
     buildGlows(lamp, gates, decor, decorGroup);
+    if (caveWalls) for (const m of caveWalls.minerals) glows.addHalo(m.x, m.y, m.z, 0.5, m.color, 0.45);
 
     // ---- 合併靜態裝飾
     const big = mergeStatic(decor.map((d) => d.obj), decorGroup, { shadows: true });
     const tiny = mergeStatic(small, decorGroup, { shadows: false });
     dynamicObjs = [...big.kept, ...tiny.kept];
+    // 洞窟水晶（光的中繼）：記下每格的物件，之後依 state.lights 的 crystal 光源 on 呼叫 setLit
+    crystalObjs = new Map();
+    if (cave) for (const d of decor) {
+      if (d.obj.parent && d.obj.userData && typeof d.obj.userData.setLit === 'function') crystalObjs.set(d.c * 4096 + d.r, d.obj);
+    }
 
     // ---- 燈光數量上限（每多一盞點光源，所有材質都會變慢）：保留守護燈的，其他最多 3 盞
     decorLights = [];
@@ -307,8 +356,62 @@ export function createWorld(container, opts = {}) {
     for (let r = 0; r < H && !world.lampPos; r++) for (let c = 0; c < W; c++) if (at(c, r) === 'L') { world.lampPos = { x: c + 0.5, z: r + 0.5 }; break; }
     cam.setLevel(W, H, terrain.bounds, levelDef.camera || {});
     if (levelDef.env) world.setEnv(levelDef.env, 0);
+    // 黑暗：bindGame 之前先依關卡設定（避免第一幀先亮再暗）
+    levelDark = !!levelDef.dark;
+    darkness.setDefault(levelDark);
+    if (levelDark) prewarmDark();
+    darkness.update(0, true);
     return { lamp, gates };
   };
+
+  /** 洞窟水晶：state.lights 裡 kind 'crystal' 的光源（同一格）on → setLit(true)；沒有黑暗時一律亮 */
+  const crystalOn = new Map();
+  function updateCrystals() {
+    if (!crystalObjs.size) return;
+    crystalOn.clear();
+    const lights = boundState && boundState.dark ? boundState.lights : null;
+    if (lights) for (const L of lights) if (L && L.kind === 'crystal') crystalOn.set(Math.floor(L.x) * 4096 + Math.floor(L.z), L.on !== false);
+    for (const [k, o] of crystalObjs) o.userData.setLit(lights ? crystalOn.get(k) === true : true);
+  }
+  world.crystals = () => crystalObjs;
+
+  /** 洞窟裝飾：B 的 makeDecor 認得就用（第三個參數傳 'cave'），不認得就用備用模型 */
+  function makeDecorFor(kind, rng, cave) {
+    const known = !Array.isArray(MODELS.DECOR_KINDS) || MODELS.DECOR_KINDS.includes(kind);
+    if (!known) {
+      const fb = makeCaveDecorFallback(kind, rng);
+      if (fb) return fb;
+    }
+    return cave ? MODELS.makeDecor(kind, rng, 'cave') : MODELS.makeDecor(kind, rng);
+  }
+
+  /** 先把共用材質補丁好（第一次進洞窟時編譯，之後不會在遊戲中卡一下） */
+  function prewarmDark() {
+    const M = MODELS.MAT;
+    if (M) for (const k of Object.keys(M)) darkness.patchMaterial(M[k]);
+    darkness.prepare(darkRoots);
+  }
+
+  // ---------------------------------------------------------------- 第二章：黑暗與光
+  /** 整合者建立 game 之後呼叫；clearLevel 時自動解除。state.dark 為 true 時才有黑暗效果。 */
+  world.bindGame = function (state) {
+    boundState = state || null;
+    darkness.bind(boundState);
+    if (boundState && boundState.dark) prewarmDark();
+    darkness.update(0, true);
+  };
+  /** 特效用：加一個短暫的光（格子座標、半徑、秒數、暖色 0–1、冷色 0–1、強度） */
+  world.addLight = (x, z, r, life = 0.5, warm = 0.8, cool = 0, inten = 1) => darkness.addTransient(x, z, r, life, warm, cool, inten);
+  /** 特效用：只亮這一幀的跟隨光（飛行中的火球、持續中的技能）；每幀都要再推一次 */
+  world.pushLight = (x, z, r, warm = 0.8, cool = 0, inten = 1) => darkness.pushLight(x, z, r, warm, cool, inten);
+  /** 格子座標的亮度 0–1（只在黑暗開啟時有意義；測試頁用） */
+  world.lightAt = (x, z) => (darkness.active ? darkness.lightAt(x, z) : 1);
+  /** 黑暗是否開啟中 */
+  world.isDark = () => darkness.active;
+  /** 其他模組的物件也要變暗（例如特效的碎石）：加入補丁範圍 */
+  world.addDarkRoot = (obj) => { if (obj && !darkRoots.includes(obj)) darkRoots.push(obj); };
+  /** 測試用：強制黑暗開關（null＝依 state.dark） */
+  world.forceDark = (v) => { darkness.force(v); if (v) prewarmDark(); };
 
   function buildGlows(lamp, gates, decor, decorGroup) {
     const ox = -world.W / 2, oz = -world.H / 2;
@@ -344,6 +447,14 @@ export function createWorld(container, opts = {}) {
       } else if (d.kind === 'crystal') {
         glows.addPool(wx, 0, wz, 1.1, '#9a7dff', 0.4);
         glows.addHalo(wx, 0.45, wz, 0.9, '#b9a0ff', 0.4);
+      } else if (d.kind === 'glowshroom') {
+        glows.addPool(wx, 0, wz, 1.5, '#3fe0c8', 0.22);
+        glows.addHalo(wx, 0.4, wz, 0.8, '#7ff5e0', 0.28);
+      } else if (d.kind === 'cavecrystal') {
+        // 水晶的「中繼發光」是動態的（effects 依 state.lights 畫），這裡只留很淡的底光
+        glows.addHalo(wx, 0.5, wz, 0.6, '#a58cff', 0.22);
+      } else if (d.kind === 'stalagmite' || d.kind === 'minecart') {
+        // 不發光
       } else {
         for (const k of clusters.slice(0, 2)) glows.addHalo(k.x, k.y, k.z, 0.45, '#ffd9a0', 0.35);
       }
@@ -418,16 +529,22 @@ export function createWorld(container, opts = {}) {
     water.update(dt);
     markers.update(dt);
     rain.update(dt, camera, cam.target, cam.dist, ps, p.night);
+    mist.update(dt, ps);
     glows.update(dt, p.night, ps);
+    darkness.update(dt);
     // 燈與傳送門的動畫由 view.js 更新；這裡只算漏怪閃爍係數
     if (lampFlicker > 0) {
       lampFlicker -= dt;
       lampFlickerK = 0.25 + 0.75 * Math.abs(Math.sin(time * 23)) * (0.5 + 0.5 * Math.sin(time * 7.3));
     } else lampFlickerK = 1;
+    updateCrystals();
     for (const o of dynamicObjs) if (o.userData && o.userData.update) o.userData.update(dt, world.env.time);
     for (const d of decorLights) d.light.intensity = d.base * (0.2 + 0.8 * p.night);
   };
-  world.render = function () { renderer.render(scene, camera); };
+  world.render = function () {
+    darkness.prepare(darkRoots);   // 黑暗開啟時：新加入的模型材質補丁（WeakSet 查表，很便宜）
+    renderer.render(scene, camera);
+  };
 
   // ---------------------------------------------------------------- 尺寸
   world.resize = function () {

@@ -2,15 +2,16 @@
 // API 見 架構.md §5 與 js/sim/README.md。
 import { TOWERS, TOWER_ORDER } from '../data/towers.js';
 import { ENEMIES } from '../data/enemies.js';
-import { SKILLS, SKILL_ORDER } from '../data/heroes.js';
+import { SKILLS, SKILL_ORDER, HEROES } from '../data/heroes.js';
 import { BAL } from './balance.js';
 import { makeRng } from './rng.js';
-import { parseMap, Pathing, cellAt } from './map.js';
+import { parseMap, Pathing, cellAt, KNOWN_CHARS, THEMES } from './map.js';
 import { SpatialGrid } from './spatial.js';
 import { buildMods } from './mods.js';
 import { emit, spawnEnemy, updateEnemies, damageEnemy, applyFreeze } from './combat.js';
 import { computeStats, effectiveRange, updateTowers, updateProjectiles, updateZones, addZone, levelData } from './towersim.js';
-import { createHero, updateHero, moveHero as heroMove, heroOnBuild } from './hero.js';
+import { createHero, updateHero, moveHero as heroMove, heroOnBuild, castHeroSkill as heroCast } from './hero.js';
+import { initLights, updateLights, lightAt as lightAtG } from './light.js';
 
 export { BAL };
 
@@ -50,9 +51,12 @@ export function createGame(levelDef, opts = {}) {
     spawns: map.spawns.map((s) => ({ index: s.index, c: s.c, r: s.r, x: s.x, z: s.z })),
     lampPos: { c: map.lampC, r: map.lampR, x: map.lampX, z: map.lampZ },
     waveSpawning: false,
+    // 第二章（架構_第二章.md §2）
+    chapter: map.chapter, theme: map.theme, dark: map.dark, lights: [],
   };
   G.state = S;
-  S.hero = createHero(G, levelDef);
+  S.hero = createHero(G, levelDef, opts.hero);
+  initLights(G);
   for (const id of SKILL_ORDER) {
     const sk = SKILLS[id];
     if (!sk) continue;
@@ -113,7 +117,8 @@ export function createGame(levelDef, opts = {}) {
       if (!info || info.cleared) continue;
       if (info.pending <= 0 && info.alive <= 0) {
         info.cleared = true;
-        if (info.reward > 0) { S.gold += info.reward; emit(G, { type: 'gold', amount: info.reward, x: map.lampX, z: map.lampZ }); }
+        const reward = info.reward + mods.waveGoldAdd; // 天賦「礦脈」：每波結束 +waveGoldAdd
+        if (reward > 0) { S.gold += reward; emit(G, { type: 'gold', amount: reward, x: map.lampX, z: map.lampZ }); }
         emit(G, { type: 'waveCleared', index: info.index, number: info.index + 1 });
       }
     }
@@ -139,6 +144,7 @@ export function createGame(levelDef, opts = {}) {
     if (S.phase === 'running') updateWaves(dt);
     updateEnemies(G, dt);
     G.grid.rebuild(S.enemies);
+    updateLights(G, dt);
     updateTowers(G, dt);
     updateProjectiles(G, dt);
     updateZones(G, dt);
@@ -185,7 +191,8 @@ export function createGame(levelDef, opts = {}) {
     if ((T.unlock || 1) > levelId) return { ok: false, reason: 'locked' };
     if (!inBounds(c, r) || isOver()) return { ok: false, reason: 'not-buildable' };
     const i = r * map.W + c;
-    if (!map.buildable[i]) return { ok: false, reason: 'not-buildable' };
+    // 燈籠可放 # o . ,；其他塔只能 # o
+    if (!(T.kind === 'light' ? map.lanternOk[i] : map.buildable[i])) return { ok: false, reason: 'not-buildable' };
     if (G.towerCell[i]) return { ok: false, reason: 'occupied' };
     if (map.chars[i] === 'o') {
       const cells = [];
@@ -211,24 +218,54 @@ export function createGame(levelDef, opts = {}) {
       id: G.nextId++, type, level: 1, branch: null, c, r, x: c + 0.5, z: r + 0.5,
       yaw: Math.atan2(map.lampX - (c + 0.5), map.lampZ - (r + 0.5)),
       range: 0, invested: cost, kills: 0, dimmed: false,
+      // 第二章：kind 'light'＝燈籠；light 照亮半徑；out 被噴墨熄滅剩餘秒數；active 稜鏡塔有光；lit 所在格在光裡；lasers 稜鏡雷射
+      kind: T.kind || 'attack', light: 0, out: 0, active: true, lit: true, lasers: [],
       // 內部
       st: null, cd: 0.2, aimT: G.rng() * 0.1, target: null, dimT: 0, dimMul: 0.7, cell: i,
     };
     t.st = computeStats(G, type, 1, null);
+    t.light = t.st.light;
     t.range = effectiveRange(G, t);
     S.towers.push(t);
     G.towerCell[i] = t;
     G.towerById.set(t.id, t);
-    if (map.chars[i] === 'o') {
+    const ch = map.chars[i];
+    if (ch === 'o') {
       G.path.setBlocked(i, true);
       G.heroWalk[i] = 0;
       G.path.recompute();
       heroOnBuild(G, i);
+    } else if (ch === '.' || ch === ',') {
+      // 燈籠放在洞窟地面：英雄不能再走這格
+      G.heroWalk[i] = 0;
+      heroOnBuild(G, i);
     }
     // 事件的 type 欄位已是事件名稱，所以塔種放在 towerType（同時給 tower 別名）
     emit(G, { type: 'build', towerId: t.id, towerType: type, tower: type, c, r, x: t.x, z: t.z });
+    if (S.dark) updateLights(G, 0);
     return t.id;
   }
+
+  // 把塔從場上拿掉（賣塔、巨蟲吞燈籠共用）：還原路線與英雄可走格、清掉荊棘地帶、關掉雷射
+  function removeTower(t) {
+    const k = S.towers.indexOf(t);
+    if (k < 0) return false;
+    S.towers.splice(k, 1);
+    G.towerCell[t.cell] = null;
+    G.towerById.delete(t.id);
+    const ch = map.chars[t.cell];
+    if (ch === 'o') {
+      G.path.setBlocked(t.cell, false);
+      G.heroWalk[t.cell] = map.heroBase[t.cell];
+      G.path.recompute();
+    } else if (ch === '.' || ch === ',') {
+      G.heroWalk[t.cell] = map.heroBase[t.cell];
+    }
+    for (let z = S.zones.length - 1; z >= 0; z--) if (S.zones[z].kind === 'thorns' && S.zones[z].towerId === t.id) S.zones.splice(z, 1);
+    if (t.lasers && t.lasers.length) { t.lasers.length = 0; emit(G, { type: 'laserOff', towerId: t.id }); }
+    return true;
+  }
+  G.removeTower = (t) => { const ok = removeTower(t); if (ok && S.dark) updateLights(G, 0); return ok; };
 
   function getTower(id) { return G.towerById.get(id) || null; }
   function towerAt(c, r) { return inBounds(c, r) ? G.towerCell[r * map.W + c] : null; }
@@ -241,15 +278,17 @@ export function createGame(levelDef, opts = {}) {
     return { damage: st.damage, rate: st.rate, range: st.baseRange, splash: st.splash || 0, special: st.special, dmgType: st.dmgType, air: st.air, name: st.name, desc: st.desc };
   }
 
+  function levelCost(type, level) { return Math.round(TOWERS[type].levels[level - 1].cost * mods.tower[type].costMul); }
+
   function upgradeInfo(id) {
     const t = getTower(id);
     if (!t) return null;
     const T = TOWERS[t.type];
     if (t.level < 3) {
-      const cost = T.levels[t.level].cost;
+      const cost = levelCost(t.type, t.level + 1);
       return { kind: 'level', cost, affordable: S.gold >= cost, next: statSummary(computeStats(G, t.type, t.level + 1, null)) };
     }
-    if (t.level === 3) {
+    if (t.level === 3 && T.branches) {
       const branches = {};
       for (const b of ['a', 'b']) {
         const B = T.branches[b];
@@ -270,12 +309,12 @@ export function createGame(levelDef, opts = {}) {
     const T = TOWERS[t.type];
     let cost;
     if (t.level < 3) {
-      cost = T.levels[t.level].cost;
+      cost = levelCost(t.type, t.level + 1);
       if (S.gold < cost) return false;
       t.level++;
     } else if (t.level === 3) {
       if (branch !== 'a' && branch !== 'b') return false;
-      if (!T.branches[branch]) return false;
+      if (!T.branches || !T.branches[branch]) return false;
       cost = branchCost(t.type, branch);
       if (S.gold < cost) return false;
       t.level = 4; t.branch = branch;
@@ -283,12 +322,14 @@ export function createGame(levelDef, opts = {}) {
     S.gold -= cost;
     t.invested += cost;
     t.st = computeStats(G, t.type, t.level, t.branch);
+    t.light = t.st.light;
     t.range = effectiveRange(G, t);
-    if (t.cd > 1 / t.st.rate) t.cd = 1 / t.st.rate;
+    if (t.st.rate > 0 && t.cd > 1 / t.st.rate) t.cd = 1 / t.st.rate;
     if (t.type === 'treant' && t.branch === 'a' && !S.zones.some((z) => z.kind === 'thorns' && z.towerId === t.id)) {
       addZone(G, 'thorns', t.x, t.z, t.range, 9999, { towerId: t.id });
     }
     emit(G, { type: 'upgrade', towerId: t.id, level: t.level, branch: t.branch, x: t.x, z: t.z });
+    if (S.dark) updateLights(G, 0);
     return true;
   }
 
@@ -303,18 +344,10 @@ export function createGame(levelDef, opts = {}) {
     if (!t) return 0;
     const value = sellValue(id);
     S.gold += value;
-    const k = S.towers.indexOf(t);
-    if (k >= 0) S.towers.splice(k, 1);
-    G.towerCell[t.cell] = null;
-    G.towerById.delete(t.id);
-    if (map.chars[t.cell] === 'o') {
-      G.path.setBlocked(t.cell, false);
-      G.heroWalk[t.cell] = map.heroBase[t.cell];
-      G.path.recompute();
-    }
-    for (let z = S.zones.length - 1; z >= 0; z--) if (S.zones[z].kind === 'thorns' && S.zones[z].towerId === t.id) S.zones.splice(z, 1);
+    removeTower(t);
     emit(G, { type: 'sell', towerId: t.id, gold: value, x: t.x, z: t.z });
     if (value > 0) emit(G, { type: 'gold', amount: value, x: t.x, z: t.z });
+    if (S.dark) updateLights(G, 0);
     return value;
   }
 
@@ -322,10 +355,13 @@ export function createGame(levelDef, opts = {}) {
     const t = getTower(id);
     if (!t) return null;
     const st = t.st;
+    const sp = st.special || null;
     return {
       name: st.name, damage: st.damage, rate: st.rate, range: t.range, dmgType: st.dmgType, air: st.air, desc: st.desc,
       splash: st.splash || 0, special: st.special, level: t.level, branch: t.branch, kills: t.kills, baseRange: st.baseRange, dimmed: t.dimmed,
-      dps: t.type === 'treant' ? st.damage * st.rate : st.damage * st.rate * ((st.special && st.special.multishot) || 1),
+      dps: st.kind === 'light' ? 0 : t.type === 'treant' ? st.damage * st.rate : t.type === 'prism' ? st.damage * ((sp && sp.beams) || 1) : st.damage * st.rate * ((sp && sp.multishot) || 1),
+      // 第二章
+      kind: st.kind, light: st.light, needsLight: st.needsLight, active: t.active, lit: t.lit, out: t.out,
     };
   }
 
@@ -335,10 +371,21 @@ export function createGame(levelDef, opts = {}) {
     const st = computeStats(G, type, level, branch);
     let range = st.baseRange;
     if (S.env.time === 'night' && type !== 'mage') range *= BAL.NIGHT_RANGE_MUL;
-    return { name: st.name, damage: st.damage, rate: st.rate, range, dmgType: st.dmgType, air: st.air, desc: st.desc, splash: st.splash || 0, special: st.special, cost: level === 1 ? Math.round(TOWERS[type].levels[0].cost * mods.tower[type].costMul) : null };
+    if (st.kind === 'light') range = st.light;
+    return { name: st.name, damage: st.damage, rate: st.rate, range, dmgType: st.dmgType, air: st.air, desc: st.desc, splash: st.splash || 0, special: st.special, cost: level === 1 ? Math.round(TOWERS[type].levels[0].cost * mods.tower[type].costMul) : null, kind: st.kind, light: st.light, needsLight: st.needsLight };
   }
 
+  // 蓋塔輪盤：洞窟地面（. ,）只會出現燈籠（燈籠解鎖時）；其他格照 TOWER_ORDER
   function buildOptions(c, r) {
+    const opt = (type) => {
+      const T = TOWERS[type];
+      const chk = canBuild(c, r, type);
+      return { type, name: T.name, icon: T.icon, cost: Math.round(T.levels[0].cost * mods.tower[type].costMul), ok: chk.ok, reason: chk.reason };
+    };
+    if (inBounds(c, r)) {
+      const ch = map.chars[r * map.W + c];
+      if ((ch === '.' || ch === ',') && TOWERS.lantern && (TOWERS.lantern.unlock || 1) <= levelId) return [opt('lantern')];
+    }
     return TOWER_ORDER.map((type) => {
       const T = TOWERS[type];
       const chk = canBuild(c, r, type);
@@ -421,6 +468,14 @@ export function createGame(levelDef, opts = {}) {
     return best;
   }
 
+  // 英雄技能（第二章）：{ ok, reason }；遊戲結束後 reason＝'over'
+  function castHeroSkill(skillId, x, z) {
+    if (isOver()) return { ok: false, reason: 'over' };
+    return heroCast(G, skillId, x, z);
+  }
+
+  if (S.dark) updateLights(G, 0);
+
   return {
     state: S,
     levelDef,
@@ -428,16 +483,36 @@ export function createGame(levelDef, opts = {}) {
     callNextWave, moveHero: (x, z) => (isOver() ? false : heroMove(G, x, z)), castSkill, getPaths, drainEvents, result,
     // 新增
     typeStats, buildOptions, pickEnemy,
-    heroCanStand: (c, r) => inBounds(c, r) && G.heroWalk[r * map.W + c] === 1,
+    heroCanStand: (c, r) => inBounds(c, r) && (S.hero.flying || G.heroWalk[r * map.W + c] === 1),
+    // 第二章
+    castHeroSkill, lightAt: (x, z) => lightAtG(G, x, z),
     _G: G, // 測試／除錯用，畫面請勿依賴
   };
 }
 
 // 檢查關卡資料（給 F 的 test_levels.mjs 用）：回傳問題字串陣列，空陣列＝沒問題
+const ENV_TIMES = ['day', 'dusk', 'night', 'cave'];
+const ENV_WEATHERS = ['clear', 'rain', 'fog', 'mist'];
+
 export function validateLevel(levelDef) {
   const problems = [];
   let map;
   try { map = parseMap(levelDef); } catch (err) { return [String(err.message || err)]; }
+  // 地圖字元
+  const bad = new Set();
+  for (const row of levelDef.grid) for (const ch of row) if (!KNOWN_CHARS.includes(ch)) bad.add(ch);
+  if (bad.size) problems.push(`地圖有未知字元：${[...bad].map((c) => `「${c}」`).join('')}`);
+  // 第二章欄位
+  if (levelDef.chapter != null && !(Number.isInteger(levelDef.chapter) && levelDef.chapter >= 1)) problems.push(`chapter 要是正整數（目前 ${JSON.stringify(levelDef.chapter)}）`);
+  if (levelDef.theme != null && !THEMES.includes(levelDef.theme)) problems.push(`theme 要是 ${THEMES.join('/')}（目前 ${JSON.stringify(levelDef.theme)}）`);
+  if (levelDef.dark != null && typeof levelDef.dark !== 'boolean') problems.push(`dark 要是 true/false（目前 ${JSON.stringify(levelDef.dark)}）`);
+  const checkEnv = (env, where) => {
+    if (!env) return;
+    if (env.time != null && !ENV_TIMES.includes(env.time)) problems.push(`${where}env.time 要是 ${ENV_TIMES.join('/')}（目前 ${JSON.stringify(env.time)}）`);
+    if (env.weather != null && !ENV_WEATHERS.includes(env.weather)) problems.push(`${where}env.weather 要是 ${ENV_WEATHERS.join('/')}（目前 ${JSON.stringify(env.weather)}）`);
+  };
+  checkEnv(levelDef.env, '');
+  (levelDef.waves || []).forEach((w, wi) => checkEnv(w.env, `第 ${wi + 1} 波：`));
   const P = new Pathing(map);
   for (const s of map.spawns) if (!P.reachable(s.i)) problems.push(`出生點 ${s.index}（${s.c},${s.r}）走不到燈`);
   const hs = levelDef.heroStart;

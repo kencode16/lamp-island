@@ -1,4 +1,5 @@
 // 敵人空間分格：每格 1×1（與地圖格相同），每幀重建一次（計數排序，不配置新物件）。
+export const Q_GROUND = 1, Q_AIR = 2, Q_TOWER = 4, Q_VISIBLE = 8;
 export class SpatialGrid {
   constructor(W, H) {
     this.W = W; this.H = H;
@@ -35,9 +36,12 @@ export class SpatialGrid {
     for (let k = n; k < items.length && items[k] !== null; k++) items[k] = null;
     this.n = n;
   }
-  // 把半徑 rad 內、還活著的敵人寫進 out[0..count)，回傳 count。mode：0 全部、1 只要地面、2 只要飛行
+  // 把半徑 rad 內、還活著的敵人寫進 out[0..count)，回傳 count。
+  // mode 低 2 位：0 全部、1 只要地面、2 只要飛行；
+  //   ＋4（Q_TOWER）＝塔能鎖定的（e.lit 且不 hidden）；＋8（Q_VISIBLE）＝不要 hidden 的。潛地中（burrowed）的一律不回傳。
   query(x, z, rad, out, mode = 0) {
     const { W, H, start, items } = this;
+    const air = mode & 3, needLit = (mode & 4) !== 0, noHidden = (mode & 8) !== 0;
     let c0 = Math.floor(x - rad), c1 = Math.floor(x + rad), r0 = Math.floor(z - rad), r1 = Math.floor(z + rad);
     if (c0 < 0) c0 = 0; if (r0 < 0) r0 = 0; if (c1 >= W) c1 = W - 1; if (r1 >= H) r1 = H - 1;
     const r2 = rad * rad;
@@ -48,8 +52,9 @@ export class SpatialGrid {
         const s = start[gi], e2 = start[gi + 1];
         for (let k = s; k < e2; k++) {
           const e = items[k];
-          if (e.dead) continue;
-          if (mode === 1 ? e.flying : mode === 2 ? !e.flying : false) continue;
+          if (e.dead || e.burrowed) continue;
+          if (air === 1 ? e.flying : air === 2 ? !e.flying : false) continue;
+          if (needLit ? (!e.lit || e.hidden) : (noHidden && e.hidden)) continue;
           const dx = e.x - x, dz = e.z - z;
           if (dx * dx + dz * dz <= r2) out[n++] = e;
         }

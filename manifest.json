@@ -1,7 +1,7 @@
 {
   "name": "守燈小島",
   "short_name": "守燈小島",
-  "description": "守護小島中央的燈火：蓋塔、指揮騎士、施放技能，擋下入夜後的怪物。",
+  "description": "守護小島中央的燈火：蓋塔、指揮三位英雄、施放技能，擋下入夜後的怪物；第二章提著燈籠走進地底洞窟。",
   "lang": "zh-Hant-TW",
   "start_url": "./index.html",
   "scope": "./",

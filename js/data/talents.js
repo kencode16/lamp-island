@@ -6,6 +6,7 @@ export const TALENT_BRANCHES = [
   { id: 'arcane', name: '法師與樹靈', color: '#8b6fd6' },
   { id: 'hero',   name: '英雄與技能', color: '#d9604a' },
   { id: 'econ',   name: '經濟',       color: '#5fae5a' },
+  { id: 'light',  name: '燈火',       color: '#f2c14e' },   // 第二章新增
 ];
 
 export const TALENTS = [
@@ -28,4 +29,14 @@ export const TALENTS = [
   { id: 'econ2', branch: 'econ', tier: 2, cost: 2, name: '舊料回收', desc: '賣塔退款從 70% 提高到 85%。', effect: { sellRatio: 0.85 } },
   { id: 'econ3', branch: 'econ', tier: 3, cost: 2, name: '戰利品',   desc: '擊殺金幣 +10%。',           effect: { killGoldMul: 1.10 } },
   { id: 'econ4', branch: 'econ', tier: 4, cost: 2, name: '搶先一步', desc: '提早叫下一波的獎勵 +50%。',   effect: { earlyBonusMul: 1.5 } },
+
+  // ===== 第二章（v2.0）：各分支第 5 層＋燈火分支，共 30 星（effect 由 A 實作，可調整內容，id 不可改） =====
+  { id: 'ranged5', branch: 'ranged', tier: 5, cost: 4, name: '神射',     desc: '弓箭塔與投石砲射程 +10%。',                 effect: { towers: ['archer', 'catapult'], rangeMul: 1.10 } },
+  { id: 'arcane5', branch: 'arcane', tier: 5, cost: 4, name: '星界共鳴', desc: '法師塔與樹靈塔傷害 +12%。',                 effect: { towers: ['mage', 'treant'], damageMul: 1.12 } },
+  { id: 'hero5',   branch: 'hero',   tier: 5, cost: 4, name: '英雄之光', desc: '英雄生命 +15%、英雄技能冷卻 -20%。',        effect: { heroHpMul: 1.15, heroSkillCdMul: 0.8 } },
+  { id: 'econ5',   branch: 'econ',   tier: 5, cost: 4, name: '礦脈',     desc: '每波結束額外 +10 金。',                    effect: { waveGoldAdd: 10 } },
+  { id: 'light1',  branch: 'light',  tier: 1, cost: 2, name: '長明燈',   desc: '燈籠照亮範圍 +15%。',                      effect: { towers: ['lantern'], lightMul: 1.15 } },
+  { id: 'light2',  branch: 'light',  tier: 2, cost: 3, name: '油燈工坊', desc: '燈籠費用 -25%。',                          effect: { towers: ['lantern'], costMul: 0.75 } },
+  { id: 'light3',  branch: 'light',  tier: 3, cost: 4, name: '稜光',     desc: '水晶稜鏡塔傷害 +15%。',                    effect: { towers: ['prism'], damageMul: 1.15 } },
+  { id: 'light4',  branch: 'light',  tier: 4, cost: 5, name: '守夜人',   desc: '燈籠不會被噴墨蝙蝠弄熄，英雄照亮範圍 +30%。', effect: { inkImmune: true, heroLightMul: 1.3 } },
 ];

@@ -1031,6 +1031,311 @@ body {
 .tm-max .ui-ico { width: 16px; height: 16px; }
 .tm-foot { margin-top: 10px; }
 
+/* ===================== v2.0：第二章、三位英雄 ===================== */
+
+/* ---------- 航海圖：章節分頁 ---------- */
+.map-tabs {
+  pointer-events: auto; flex: none;
+  display: flex; gap: 4px; padding: 4px; border-radius: 14px;
+  background: rgba(105, 77, 48, .12); box-shadow: inset 0 0 0 1.5px rgba(105, 77, 48, .28);
+}
+.map-tab {
+  pointer-events: auto; appearance: none; border: 0; cursor: pointer; position: relative;
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 40px; padding: 0 14px 0 10px; border-radius: 10px;
+  background: transparent; color: var(--ink-2);
+  font-size: 15px; font-weight: 800; letter-spacing: .06em; white-space: nowrap;
+  transition: background .2s, color .2s;
+}
+.map-tab .ui-ico { width: 22px; height: 22px; }
+.map-tab-sub { font-size: 13px; font-weight: 700; color: var(--ink-3); margin-left: -2px; }
+.map-tab-sub::before { content: '．'; }
+.map-tab-stars { font-size: 12px; font-weight: 900; color: var(--gold-4); font-variant-numeric: tabular-nums; }
+.map-tab.is-on {
+  color: var(--cream); text-shadow: 0 1px 1px rgba(0, 0, 0, .3);
+  background: linear-gradient(180deg, var(--teal-1), var(--teal-2));
+  box-shadow: inset 0 0 0 1.5px var(--teal-4), 0 2px 5px rgba(0, 0, 0, .22);
+}
+.map-tab.is-on .map-tab-sub, .map-tab.is-on .map-tab-stars { color: var(--gold-1); }
+.map-tab[data-chapter="2"].is-on {
+  background: linear-gradient(180deg, #514a7c, #2b2648);
+  box-shadow: inset 0 0 0 1.5px #17132c, 0 0 12px rgba(140, 120, 230, .45), 0 2px 5px rgba(0, 0, 0, .22);
+}
+.map-tab.is-locked:not(.is-on) { color: var(--ink-3); }
+.map-tab.is-locked .ui-ico { color: currentColor; --ico-hole: #efe2c0; }
+.map-tab.is-locked.is-on .ui-ico { --ico-hole: #2b2648; }
+@media (hover: hover) and (pointer: fine) {
+  .map-tab:not(.is-on):hover { background: rgba(255, 255, 255, .45); }
+}
+
+/* ---------- 第二章：地底洞窟地圖 ---------- */
+.map-chart.is-cave {
+  background:
+    radial-gradient(ellipse 60% 40% at 50% 110%, rgba(110, 24, 60, .32), transparent 70%),
+    radial-gradient(ellipse at 50% 42%, #2d2d47 0%, #1b1b2e 58%, #0c0c17 100%);
+  box-shadow: inset 0 0 70px rgba(0, 0, 0, .8), inset 0 0 0 2px rgba(18, 14, 34, .95), 0 2px 6px rgba(60, 40, 10, .3);
+}
+.map-chart.is-cave::before { border-color: rgba(170, 160, 230, .2); }
+.map-chart.is-cave::after { border-color: rgba(170, 160, 230, .1); }
+.cv-stal { fill: #10101e; stroke: #302f4c; stroke-width: 1.4; stroke-linejoin: round; }
+.cv-stal.is-up { fill: #131324; }
+.cv-river-bank { fill: none; stroke: #0a1322; stroke-width: 46; stroke-linecap: round; }
+.cv-river { fill: none; stroke: #1d4272; stroke-width: 28; stroke-linecap: round; }
+.cv-river-ripple { fill: none; stroke: #8ccaff; stroke-opacity: .4; stroke-width: 2.2; stroke-linecap: round; stroke-dasharray: 10 20; animation: cvFlow 3.4s linear infinite; }
+.cv-pit-rim { fill: none; stroke: #ff5f7f; stroke-opacity: .38; stroke-width: 3; stroke-linecap: round; }
+.cv-rail-ties { fill: none; stroke: #4c3524; stroke-width: 15; stroke-dasharray: 3.5 8; }
+.cv-rail { fill: none; stroke: #8c8ca8; stroke-width: 9; stroke-linecap: round; }
+.cv-rail-in { fill: none; stroke: #191a2b; stroke-width: 5.6; stroke-linecap: round; }
+.cv-shroom-stem { fill: #d6f6ee; }
+.cv-shroom-cap { fill: #56e6c4; stroke: #17705f; stroke-width: 1; }
+.cv-shroom-dot { fill: #f0fffb; }
+.cv-xtal-body { stroke: #4a2a88; stroke-width: 1; stroke-linejoin: round; }
+.cv-xtal-face { fill: rgba(255, 255, 255, .24); }
+.cv-mote { fill: #fff2c2; opacity: .4; animation: cvMote 6s ease-in-out infinite; }
+.cv-route { fill: none; stroke: #9c97c8; stroke-opacity: .32; stroke-width: 3; stroke-dasharray: 1 9; stroke-linecap: round; }
+.cv-route.is-done { stroke: #ffd77a; stroke-opacity: .95; stroke-width: 3.2; stroke-dasharray: 11 8; }
+.cv-route-glow { fill: none; stroke: #ffc457; stroke-opacity: .2; stroke-width: 13; stroke-linecap: round; }
+.cv-node { --zc: #56e6c4; }
+.cv-node.zone-river { --zc: #62adff; }
+.cv-node.zone-crystal { --zc: #c792ff; }
+.cv-node.zone-abyss { --zc: #ff6f7e; }
+.cv-shadow { fill: rgba(0, 0, 0, .5); }
+.cv-rock { fill: #3d3c5a; stroke: #17162a; stroke-width: 2; }
+.cv-top { fill: #4f4e72; }
+.cv-chip { fill: var(--zc); opacity: .9; }
+.cv-glow { animation: cvGlow 3.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.cv-medal-bg { fill: #1b1a2b; stroke: var(--zc); stroke-width: 3; }
+.cv-node .mp-medal-num { fill: #f3efff; }
+.cv-node.is-cleared .cv-medal-bg { fill: #6b3f12; stroke: #ffd77a; }
+.cv-node.is-cleared .mp-medal-num { fill: #fff1bd; }
+.cv-node.is-cleared .cv-top { fill: #5f5470; }
+.cv-pulse { stroke: var(--zc); }
+.cv-node .mp-star { fill: rgba(210, 200, 255, .16); stroke: rgba(210, 200, 255, .5); }
+.cv-node .mp-star.on { fill: #f6c94a; stroke: #8a6118; }
+.cv-label-bg { fill: #1c1b2d; stroke: var(--zc); stroke-opacity: .75; stroke-width: 1.6; }
+.cv-label-txt { fill: #efeafd; font-size: 15px; font-weight: 800; text-anchor: middle; dominant-baseline: central; letter-spacing: .06em; }
+.cv-node.is-locked .cv-rock { fill: #2b2a3d; }
+.cv-node.is-locked .cv-top { fill: #343349; }
+.cv-node.is-locked .cv-chip { opacity: .22; }
+.cv-node.is-locked .cv-medal-bg { fill: #29283a; stroke: #57556f; }
+.cv-node.is-locked .cv-label-bg { fill: #191826; stroke: #45435c; }
+.cv-node.is-locked .cv-label-txt { fill: #8e8ba6; }
+.cv-node .mp-lock { stroke: #c9c4e0; }
+.cv-node .mp-lock-body { fill: #c9c4e0; }
+.cv-node.is-locked .mp-aura { opacity: .35; }
+@media (hover: hover) and (pointer: fine) {
+  .cv-node:not(.is-locked):hover .cv-label-bg { fill: #2a2843; stroke-width: 2.4; }
+  .cv-node:not(.is-locked):hover .cv-medal-bg { stroke-width: 4; }
+}
+.mp-node.cv-node:focus-visible .mp-hit { stroke: #ffd77a; }
+
+/* 章節還沒開放：鎖住的預覽 */
+.map-lockpane {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  display: grid; place-items: center; padding: 12px;
+  background: radial-gradient(ellipse at 50% 50%, rgba(8, 8, 18, .3), rgba(8, 8, 18, .72));
+}
+.mlp-box {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center;
+  padding: 18px 30px 16px; border-radius: 18px;
+  background: rgba(22, 20, 38, .86); color: #efeafd;
+  box-shadow: inset 0 0 0 1.5px rgba(200, 182, 255, .35), 0 12px 30px rgba(0, 0, 0, .5);
+}
+.mlp-ico {
+  width: 58px; height: 58px; border-radius: 50%; display: grid; place-items: center; margin-bottom: 2px;
+  background: radial-gradient(circle at 50% 35%, #565080, #24203c 75%);
+  box-shadow: 0 0 0 2px #8f84c8, 0 0 22px rgba(150, 130, 255, .45);
+}
+.mlp-ico .ui-ico { width: 30px; height: 30px; color: #ebe5ff; --ico-hole: #2c2848; }
+.mlp-title { font-size: 20px; font-weight: 900; letter-spacing: .14em; color: #fff3cf; }
+.mlp-text { font-size: 16px; font-weight: 800; letter-spacing: .08em; color: #ffd77a; }
+.mlp-sub { font-size: 13px; font-weight: 600; color: #b8b2d8; }
+
+/* ---------- 關卡介紹卡：左邊關卡資訊、右邊選英雄 ---------- */
+.lvl-card.has-heroes {
+  width: min(820px, 100%);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.34fr);
+  grid-template-areas: "info hp" "btns btns";
+  column-gap: 22px; row-gap: 14px; align-items: center;
+  padding: 22px 24px 18px;
+}
+.lvl-info { grid-area: info; min-width: 0; }
+.has-heroes .lvl-rec { margin-bottom: 0; }
+.has-heroes .lvl-btns { grid-area: btns; }
+.ui-tag.is-dark { background: rgba(40, 36, 70, .14); box-shadow: inset 0 0 0 1px rgba(40, 36, 70, .3); color: #3c3566; }
+.hp {
+  grid-area: hp; min-width: 0; align-self: stretch;
+  display: flex; flex-direction: column; justify-content: center; gap: 8px;
+  padding-left: 20px; border-left: 1.5px dashed rgba(138, 97, 24, .4);
+}
+.hp-title { display: flex; align-items: center; gap: 8px; min-height: 34px; padding-right: 48px; }
+.hp-title b { font-size: 16px; font-weight: 900; letter-spacing: .14em; color: var(--wood-3); }
+.hp-title small { font-size: 12px; font-weight: 700; color: var(--ink-3); }
+.hp-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.hp-card {
+  pointer-events: auto; appearance: none; border: 0; cursor: pointer; position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 10px 6px 8px; border-radius: 14px; min-width: 0;
+  font-family: inherit; text-align: center; color: var(--ink);
+  background: linear-gradient(180deg, #fffaf0, var(--parch-2));
+  box-shadow: inset 0 0 0 1.5px rgba(120, 85, 40, .35), 0 2px 5px rgba(60, 40, 10, .16);
+  transition: transform .12s, box-shadow .2s;
+}
+.hp-card:active:not(.is-locked) { transform: scale(.97); }
+.hp-face {
+  width: 54px; height: 54px; border-radius: 50%; flex: none;
+  display: grid; place-items: center;
+  background: radial-gradient(circle at 50% 35%, #6f9fd0, #1f3a62 75%);
+  box-shadow: 0 0 0 2px var(--wood-3), 0 3px 6px rgba(0, 0, 0, .25);
+}
+.hp-face .ui-ico { width: 46px; height: 46px; }
+.hp-card[data-hero="fairy"] .hp-face, .res-unlock[data-hero="fairy"] .ru-ico { background: radial-gradient(circle at 50% 35%, #8edb9c, #23674a 75%); }
+.hp-card[data-hero="mage"] .hp-face, .res-unlock[data-hero="mage"] .ru-ico { background: radial-gradient(circle at 50% 35%, #ab92e6, #3a2b80 75%); }
+.hp-name { font-size: 15px; font-weight: 900; letter-spacing: .04em; color: var(--wood-3); margin-top: 2px; white-space: nowrap; }
+.hp-role { font-size: 11.5px; font-weight: 700; color: var(--ink-3); white-space: nowrap; }
+.hp-tags { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; }
+.hp-tags i { font-style: normal; font-size: 11px; font-weight: 800; padding: 1px 6px; border-radius: 6px; background: rgba(35, 112, 111, .13); color: var(--teal-3); white-space: nowrap; }
+.hp-skills { width: 100%; display: flex; flex-direction: column; gap: 2px; margin-top: 3px; padding-top: 5px; border-top: 1px dashed rgba(138, 97, 24, .35); }
+.hp-sk { display: flex; align-items: center; justify-content: center; gap: 3px; font-size: 12px; font-weight: 700; color: var(--ink-2); white-space: nowrap; }
+.hp-sk em { font-style: normal; font-size: 13px; line-height: 1; }
+.hp-sk small { font-size: 10px; font-weight: 900; color: var(--gold-4); background: rgba(241, 199, 92, .38); border-radius: 4px; padding: 0 3px; }
+.hp-check {
+  position: absolute; right: 6px; top: 6px; width: 22px; height: 22px; border-radius: 50%;
+  display: none; place-items: center; background: var(--ok); color: #fff; box-shadow: 0 0 0 2px #fffaf0;
+}
+.hp-check .ui-ico { width: 14px; height: 14px; }
+.hp-card.is-on {
+  background: linear-gradient(180deg, #fff6d4, #f6dc9a);
+  box-shadow: inset 0 0 0 2.5px var(--gold-3), 0 0 14px rgba(241, 199, 92, .6), 0 2px 5px rgba(60, 40, 10, .16);
+}
+.hp-card.is-on .hp-check { display: grid; }
+.hp-card.is-locked { cursor: default; background: linear-gradient(180deg, #efe6d2, #ddd0b4); }
+.hp-card.is-locked > :not(.hp-lock) { opacity: .3; filter: grayscale(.9); }
+.hp-lock {
+  position: absolute; inset: 0; border-radius: 14px; padding: 6px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  color: var(--wood-3); font-size: 12px; font-weight: 900; text-align: center;
+  background: rgba(236, 226, 204, .45);
+}
+.hp-lock .ui-ico { width: 30px; height: 30px; color: var(--wood-2); --ico-hole: #e6dcc6; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .2)); }
+.hp-lock-txt { padding: 3px 8px; border-radius: 8px; background: rgba(255, 250, 235, .95); box-shadow: inset 0 0 0 1px rgba(120, 85, 40, .35); line-height: 1.3; }
+.hp-desc { min-height: 3em; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+@media (hover: hover) and (pointer: fine) {
+  .hp-card:not(.is-locked):not(.is-on):hover { box-shadow: inset 0 0 0 2px var(--gold-2), 0 2px 8px rgba(60, 40, 10, .22); }
+}
+
+/* ---------- 天賦：5 條分支（放不下就左右捲動） ---------- */
+.tal-cols {
+  grid-template-columns: repeat(var(--nb, 5), minmax(176px, 1fr));
+  overflow: auto; touch-action: pan-x pan-y; overscroll-behavior: contain;
+  scroll-snap-type: x proximity;
+}
+.tal-col { scroll-snap-align: start; }
+.tal-list { flex: none; justify-content: flex-start; }
+.tal-node { min-height: 70px; }
+.tal-main { padding-right: 0; }
+.tal-name { padding-right: 34px; }
+
+/* ---------- 結算：解鎖新英雄／新章節 ---------- */
+.res-unlocks { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 12px 0 2px; }
+.res-unlock {
+  display: inline-flex; align-items: center; gap: 10px; text-align: left;
+  padding: 6px 16px 6px 6px; border-radius: 16px;
+  background: linear-gradient(180deg, #fff6d4, #f3d68a);
+  box-shadow: inset 0 0 0 2px var(--gold-3), 0 0 18px rgba(255, 200, 90, .55);
+  opacity: 0; transform: scale(.8);
+  transition: opacity .3s, transform .5s cubic-bezier(.2, 1.6, .4, 1);
+}
+.res-unlock.is-in { opacity: 1; transform: none; }
+.ru-ico {
+  flex: none; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center;
+  background: radial-gradient(circle at 50% 35%, #6f9fd0, #1f3a62 75%);
+  box-shadow: 0 0 0 2px var(--wood-3), 0 0 12px rgba(255, 215, 120, .7);
+}
+.ru-ico .ui-ico { width: 40px; height: 40px; }
+.res-unlock.is-chapter .ru-ico { background: radial-gradient(circle at 50% 35%, #5a5282, #1d1a32 75%); }
+.res-unlock.is-chapter .ru-ico .ui-ico { width: 32px; height: 32px; }
+.ru-txt { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.ru-txt b { font-size: 17px; font-weight: 900; letter-spacing: .05em; color: var(--wood-3); }
+.ru-txt small { font-size: 12px; font-weight: 700; color: var(--ink-2); }
+
+/* ---------- HUD：英雄頭像旁的兩顆英雄技能 ---------- */
+.hud-hero { align-items: flex-end; }
+.hero-skills { display: flex; gap: 10px; align-items: center; margin-bottom: 7px; }
+.hero-skills:empty { display: none; }
+.hskill {
+  pointer-events: auto; appearance: none; border: 0; padding: 0; cursor: pointer;
+  position: relative; width: 56px; height: 56px; border-radius: 50%; flex: none;
+  background: radial-gradient(circle at 50% 30%, #6a8fc4, #1f3558 76%);
+  box-shadow: inset 0 0 0 2px rgba(255, 241, 189, .45), 0 0 0 2px var(--wood-3), 0 4px 10px rgba(0, 0, 0, .45);
+  transition: transform .1s, filter .3s;
+}
+.hud-hero[data-hero="fairy"] .hskill { background: radial-gradient(circle at 50% 30%, #6fcf9b, #1b513b 76%); }
+.hud-hero[data-hero="mage"] .hskill { background: radial-gradient(circle at 50% 30%, #a183e0, #33246a 76%); }
+.hskill:active { transform: scale(.94); }
+.hskill.is-hidden { display: none; }
+.hs-ico { position: absolute; inset: 0; display: grid; place-items: center; font-size: 27px; line-height: 1; transition: filter .3s; }
+.hs-ring { position: absolute; left: -5px; top: -5px; width: calc(100% + 10px); height: calc(100% + 10px); transform: rotate(-90deg); overflow: visible; pointer-events: none; }
+.hs-track { fill: none; stroke: rgba(12, 8, 20, .7); stroke-width: 4.5; }
+.hs-arc { fill: none; stroke: var(--gold-2); stroke-width: 4.5; stroke-linecap: round; transition: stroke-dashoffset .25s linear, stroke .3s; }
+.hskill.is-cooling .hs-arc { stroke: #9fd6ff; }
+.hskill.is-cooling .hs-ico { filter: grayscale(.8) brightness(.5); }
+.hs-num { position: absolute; inset: 0; display: grid; place-items: center; font-size: 20px; font-weight: 900; color: #fff; text-shadow: 0 2px 4px #000; font-variant-numeric: tabular-nums; pointer-events: none; }
+.hs-lock {
+  position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+  display: none; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(10, 8, 20, .5);
+}
+.hs-lock .ui-ico { width: 18px; height: 18px; color: #f0e8d6; --ico-hole: #2a2840; }
+.hs-lock small { margin-top: 1px; font-size: 11px; font-weight: 900; line-height: 1; color: var(--gold-1); text-shadow: 0 1px 2px #000; }
+.hskill.is-locked .hs-lock { display: flex; }
+.hskill.is-locked .hs-ico { filter: grayscale(1) brightness(.55); }
+.hskill.is-locked .hs-arc { stroke: rgba(255, 255, 255, .14); }
+.hskill.is-ready { box-shadow: inset 0 0 0 2px var(--gold-1), 0 0 0 2px var(--wood-3), 0 0 14px rgba(255, 210, 110, .65), 0 4px 10px rgba(0, 0, 0, .45); animation: skillReady 2.4s ease-in-out infinite; }
+.hskill.is-targeting { animation: none; box-shadow: inset 0 0 0 3px #fff, 0 0 0 2px var(--wood-3), 0 0 22px #b9a6ff, 0 0 40px rgba(150, 120, 255, .6); }
+.hud-hero.is-dead .hskill { filter: grayscale(1) brightness(.62); animation: none; }
+.hud-hero.is-dead .hs-arc { stroke: rgba(255, 255, 255, .14); }
+.hskill .ui-key { right: -3px; top: auto; bottom: -5px; }
+.hskill .hs-name { transform: translate(-50%, -9px); }
+.hero-info { align-self: center; }
+
+/* 英雄技能瞄準：提示條換成紫色 */
+.ui-root.is-hero-targeting .ui-target.is-open {
+  background: linear-gradient(180deg, rgba(48, 40, 104, .95), rgba(26, 21, 62, .95));
+  box-shadow: inset 0 0 0 1.5px #b9a6ff, 0 0 20px rgba(150, 120, 255, .55), 0 6px 14px rgba(0, 0, 0, .4);
+  animation: tgtGlowHero 1.5s ease-in-out infinite;
+}
+
+/* 教學泡泡：讓開左下（英雄＋技能）與右下（流星雨、冰封） */
+.ui-tip { max-width: min(580px, calc(100% - 2 * (max(var(--sa-l), var(--sa-r)) + 372px))); }
+@media (max-width: 1180px) and (min-height: 521px) and (min-width: 761px) {
+  .hero-info { display: none; }
+  .ui-tip { max-width: min(580px, calc(100% - 2 * (max(var(--sa-l), var(--sa-r)) + 236px))); }
+}
+
+/* ---------- 塔選單：燈籠、稜鏡塔 ---------- */
+.tm-tag.is-needlight { background: #fff0c2; color: #8a5a00; box-shadow: inset 0 0 0 1px rgba(200, 150, 30, .45); }
+.tm-tag.is-lighttag { background: #ebe1d0; color: #8a7a62; }
+.tm-chip.is-light { background: rgba(255, 236, 170, .7); box-shadow: inset 0 0 0 1px rgba(200, 150, 30, .4); }
+.tm-chip.is-light .ui-ico { width: 17px; height: 17px; }
+.tm-warn {
+  display: flex; flex-direction: column; gap: 1px;
+  margin: -2px 0 10px; padding: 7px 10px 7px 34px; border-radius: 10px; position: relative;
+  background: linear-gradient(180deg, #353060, #24203f); color: #e9e4ff; font-size: 12px; font-weight: 700;
+  box-shadow: inset 0 0 0 1.5px #8f84c8, 0 2px 6px rgba(20, 10, 40, .3);
+}
+.tm-warn::before {
+  content: '!'; position: absolute; left: 9px; top: 50%; margin-top: -10px;
+  width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
+  background: #ffd77a; color: #3a2a00; font-size: 13px; font-weight: 900;
+}
+.tm-warn b { font-size: 13.5px; color: #ffd77a; letter-spacing: .02em; }
+.tm-warn.is-ink { background: linear-gradient(180deg, #2c2c38, #1c1c26); box-shadow: inset 0 0 0 1.5px #5c5c72; }
+
+/* ---------- 蓋塔輪盤：1 個／5–6 個選項 ---------- */
+.bm-n1 .bm-ring { width: 120px; height: 120px; margin: -60px 0 0 -60px; }
+.bm-n5 .bm-ring, .bm-n6 .bm-ring { width: 232px; height: 232px; margin: -116px 0 0 -116px; }
+
 /* ===================== 手機橫向（矮螢幕）精簡版 ===================== */
 @media (max-height: 520px), (max-width: 760px) {
   .ui-root { --edge: 8px; --r-l: 16px; font-size: 14px; }
@@ -1157,6 +1462,85 @@ body {
   .hud-lampbar { width: 50px; }
 }
 
+/* v2.0 手機橫向（矮螢幕）精簡版 */
+@media (max-height: 520px), (max-width: 760px) {
+  /* 航海圖分頁 */
+  .map-tabs { padding: 3px; gap: 3px; border-radius: 12px; }
+  .map-tab { height: 38px; padding: 0 11px 0 8px; font-size: 14px; gap: 5px; }
+  .map-tab .ui-ico { width: 19px; height: 19px; }
+  .map-tab-sub, .map-tab-stars { display: none; }
+  .mlp-box { padding: 12px 20px 11px; gap: 4px; }
+  .mlp-ico { width: 46px; height: 46px; }
+  .mlp-ico .ui-ico { width: 24px; height: 24px; }
+  .mlp-title { font-size: 17px; }
+  .mlp-text { font-size: 14px; }
+  .mlp-sub { font-size: 12px; }
+
+  /* 關卡介紹卡＋選英雄 */
+  .lvl-card.has-heroes { width: 100%; max-width: 840px; padding: 12px 16px 12px; column-gap: 14px; row-gap: 8px; }
+  .has-heroes .lvl-name { font-size: 22px; margin-bottom: 5px; }
+  .has-heroes .lvl-desc { font-size: 13px; line-height: 1.45; margin: 6px 0; }
+  .has-heroes .lvl-tags .ui-tag { font-size: 12px; padding: 2px 8px; }
+  .has-heroes .lvl-new { margin-bottom: 6px; }
+  .hp { padding-left: 14px; gap: 6px; }
+  .hp-title b { font-size: 14px; }
+  .hp-title { min-height: 40px; }
+  .hp-title small { display: none; }
+  .hp-cards { gap: 6px; }
+  .hp-card { padding: 7px 4px 6px; gap: 2px; border-radius: 12px; }
+  .hp-lock { border-radius: 12px; }
+  .hp-face { width: 40px; height: 40px; }
+  .hp-face .ui-ico { width: 35px; height: 35px; }
+  .hp-name { font-size: 13.5px; margin-top: 1px; }
+  .hp-role { font-size: 10.5px; }
+  .hp-tags i { font-size: 10px; padding: 0 5px; }
+  .hp-skills { margin-top: 2px; padding-top: 3px; gap: 1px; }
+  .hp-sk { font-size: 11px; }
+  .hp-sk em { font-size: 12px; }
+  .hp-check { width: 19px; height: 19px; right: 4px; top: 4px; }
+  .hp-check .ui-ico { width: 12px; height: 12px; }
+  .hp-lock .ui-ico { width: 24px; height: 24px; }
+  .hp-lock { font-size: 11px; }
+  .hp-desc { font-size: 12px; line-height: 1.4; min-height: 2.8em; }
+
+  /* 天賦：一次看約四條分支，左右滑動看第五條 */
+  .scr-talents { padding-top: calc(var(--sa-t) + 6px); padding-bottom: calc(var(--sa-b) + 6px); }
+  .tal-frame { padding: 7px 9px 8px; }
+  .tal-head { padding-bottom: 5px; }
+  .tal-cols { grid-template-columns: repeat(var(--nb, 5), minmax(186px, 1fr)); }
+  .tal-col { padding: 5px 6px 6px; }
+  .tal-col-head { margin-bottom: 5px; padding-bottom: 3px; }
+  .tal-col-head b { font-size: 13.5px; }
+  .tal-list { gap: 5px; }
+  .tal-node { min-height: 50px; padding: 4px 7px 4px 5px; }
+  .tal-name { line-height: 1.22; padding-right: 26px; }
+  .tal-desc { line-height: 1.24; margin-top: 1px; }
+
+  /* 結算：有解鎖時把星數規則收起來，騰出高度 */
+  .res-unlocks { margin: 6px 0 2px; gap: 6px; }
+  .res-unlock { padding: 4px 12px 4px 4px; gap: 8px; border-radius: 14px; }
+  .ru-ico { width: 36px; height: 36px; }
+  .ru-ico .ui-ico { width: 31px; height: 31px; }
+  .res-unlock.is-chapter .ru-ico .ui-ico { width: 25px; height: 25px; }
+  .ru-txt b { font-size: 15px; }
+  .ru-txt small { font-size: 11px; }
+  .scr-result.has-unlocks .res-rule { display: none; }
+  .scr-result.has-unlocks .res-btns { margin-top: 10px; }
+
+  /* HUD 英雄技能 */
+  .hud-hero { gap: 8px; }
+  .hero-skills { gap: 9px; margin-bottom: 4px; }
+  .hskill { width: 50px; height: 50px; }
+  .hs-ico { font-size: 24px; }
+  .hs-num { font-size: 18px; }
+  .ui-tip { max-width: calc(100% - 2 * (max(var(--sa-l), var(--sa-r)) + 196px)); }
+
+  .tm-warn { font-size: 11px; padding: 5px 8px 5px 30px; margin-bottom: 8px; }
+  .tm-warn b { font-size: 12.5px; }
+  .tm-warn::before { left: 7px; width: 18px; height: 18px; margin-top: -9px; font-size: 12px; }
+  .bm-n5 .bm-ring, .bm-n6 .bm-ring { width: 204px; height: 204px; margin: -102px 0 0 -102px; }
+}
+
 /* ===================== 動畫 ===================== */
 @keyframes titleIn { from { opacity: 0; transform: translateY(-14px); } to { opacity: 1; transform: none; } }
 @keyframes lanternSway { 0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); } }
@@ -1177,6 +1561,10 @@ body {
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes rotPhone { 0%, 18% { transform: rotate(0); } 48%, 78% { transform: rotate(-90deg); } 100% { transform: rotate(0); } }
 @keyframes fadeArrow { 0%, 18% { opacity: 1; } 40%, 85% { opacity: .15; } 100% { opacity: 1; } }
+@keyframes cvFlow { to { stroke-dashoffset: -60; } }
+@keyframes cvMote { 0%, 100% { opacity: .12; } 50% { opacity: .7; } }
+@keyframes cvGlow { 0%, 100% { opacity: .78; transform: scale(.96); } 50% { opacity: 1; transform: scale(1.04); } }
+@keyframes tgtGlowHero { 0%, 100% { box-shadow: inset 0 0 0 1.5px #b9a6ff, 0 0 14px rgba(150, 120, 255, .45), 0 6px 14px rgba(0, 0, 0, .4); } 50% { box-shadow: inset 0 0 0 1.5px #ddd2ff, 0 0 26px rgba(150, 120, 255, .8), 0 6px 14px rgba(0, 0, 0, .4); } }
 
 @media (prefers-reduced-motion: reduce) {
   .ui-root *, .ui-root *::before, .ui-root *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }

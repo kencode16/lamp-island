@@ -90,12 +90,14 @@ export function createMenus(ui) {
     const B = compact ? 58 : 66;          // 圓鈕直徑
     const LW = compact ? 84 : 96, LH = compact ? 40 : 44;   // 標籤（寬、含上方間距的高；兩行字）
     const n = opts.length;
-    const R = compact ? (n >= 3 ? 84 : 76) : (n >= 3 ? 100 : 90);
-    // 標籤掛在圓鈕下方：避免有選項正好在中心正上方（標籤會蓋住中間的 ×）
-    const ANGLES = { 1: [180], 2: [180, 0], 3: [-150, -30, 90], 4: [-135, -45, 45, 135] };
+    // 半徑：1 個選項放正上方（標籤要讓開中間的 ×）；5、6 個排成五角／六角形
+    // 5、6 個時上下相鄰兩個選項的垂直距離≈R，要放得下「圓鈕＋標籤＋原因小牌」
+    const R = n === 1 ? (compact ? 102 : 112) : n >= 5 ? (compact ? 110 : 124) : compact ? (n >= 3 ? 84 : 76) : (n >= 3 ? 100 : 90);
+    // 標籤掛在圓鈕下方：除了單一選項，避免有選項正好在中心正上方又太近（標籤會蓋住中間的 ×）
+    const ANGLES = { 1: [-90], 2: [180, 0], 3: [-150, -30, 90], 4: [-135, -45, 45, 135], 5: [-162, -90, -18, 54, 126], 6: [-150, -90, -30, 30, 90, 150] };
     const angleOf = i => (ANGLES[n] ? ANGLES[n][i] : -90 + (360 / n) * i);
 
-    const wheel = h('div', { class: 'bm', role: 'menu', 'aria-label': '蓋塔' });
+    const wheel = h('div', { class: 'bm bm-n' + n, role: 'menu', 'aria-label': '蓋塔' });
     const centerBtn = h('button', { type: 'button', class: 'bm-center', 'aria-label': '關閉', onclick: () => { ui.sound('click'); close('cancel'); } }, icon('close'));
     wheel.append(h('div', { class: 'bm-ring' }), centerBtn);
 
@@ -184,26 +186,39 @@ export function createMenus(ui) {
       h('div', { class: 'tm-title' }, h('b', { class: 'tm-name' }, def.name || stats.name || '塔'), h('div', { class: 'tm-level' }, pips, lvText)),
       h('button', { type: 'button', class: 'tm-close', 'aria-label': '關閉', onclick: () => { ui.sound('click'); close('cancel'); } }, icon('close')));
 
-    // 數值
+    // 數值（燈籠：只顯示照亮範圍；稜鏡塔：持續雷射，傷害是每秒、需要光照）
     const dmgType = stats.dmgType || def.dmgType;
     const air = stats.air ?? def.air;
-    const chips = h('div', { class: 'tm-stats' },
-      chip('sword', '傷害', fmt(stats.damage), dmgType === 'magic' ? 'is-magic' : ''),
-      chip('clock', '攻速', fmt(stats.rate, 2) + '/秒'),
-      chip('target', '射程', fmt(stats.range ?? tower.range)),
-      h('span', { class: 'tm-tag ' + (dmgType === 'magic' ? 'is-magic' : 'is-phys') }, DMG_TEXT[dmgType] || '物理'),
-      h('span', { class: 'tm-tag ' + (air ? 'is-air' : 'is-noair') }, air ? '可對空' : '不對空'),
-      tower.kills != null ? h('span', { class: 'tm-tag is-kills' }, `擊殺 ${tower.kills}`) : null);
+    const isLight = def.kind === 'light' || tower.kind === 'light' || tower.type === 'lantern';
+    const needsLight = !!(def.needsLight || stats.needsLight);
+    const lightR = stats.light ?? tower.light ?? stats.range ?? tower.range;
+    const chips = isLight
+      ? h('div', { class: 'tm-stats' },
+        chip('lamp', '照亮範圍', fmt(lightR) + ' 格', 'is-light'),
+        h('span', { class: 'tm-tag is-lighttag' }, '不會攻擊'))
+      : h('div', { class: 'tm-stats' },
+        chip('sword', '傷害', fmt(stats.damage) + (needsLight ? '/秒' : ''), dmgType === 'magic' ? 'is-magic' : ''),
+        needsLight ? null : chip('clock', '攻速', fmt(stats.rate, 2) + '/秒'),
+        chip('target', '射程', fmt(stats.range ?? tower.range)),
+        h('span', { class: 'tm-tag ' + (dmgType === 'magic' ? 'is-magic' : 'is-phys') }, DMG_TEXT[dmgType] || '物理'),
+        h('span', { class: 'tm-tag ' + (air ? 'is-air' : 'is-noair') }, air ? '可對空' : '不對空'),
+        needsLight ? h('span', { class: 'tm-tag is-needlight' }, '☀ 需要光照') : null,
+        tower.kills != null ? h('span', { class: 'tm-tag is-kills' }, `擊殺 ${tower.kills}`) : null);
+    // 狀態提示：稜鏡塔在暗處、燈籠被噴墨弄熄
+    let warn = null;
+    if (needsLight && tower.active === false) warn = h('div', { class: 'tm-warn' }, h('b', null, '這座塔目前在暗處，不會攻擊'), h('span', null, '在附近點一盞燈籠就能啟動'));
+    else if (isLight && tower.out > 0) warn = h('div', { class: 'tm-warn is-ink' }, h('b', null, '燈籠被噴墨弄熄了'), h('span', null, `${Math.ceil(tower.out)} 秒後重新點亮`));
 
     const body = h('div', { class: 'tm-body' });
     const actions = {};
     if (upgradeInfo.kind === 'level') {
       const next = upgradeInfo.next || {};
       const diff = h('div', { class: 'tm-diff' });
-      const rows = [['damage', '傷害', 1], ['rate', '攻速', 2], ['range', '射程', 1], ['splash', '範圍', 1]];
+      const rows = isLight ? [[next.light != null ? 'light' : 'range', '照亮', 1]]
+        : [['damage', needsLight ? '傷害/秒' : '傷害', 1], ['rate', '攻速', 2], ['range', '射程', 1], ['splash', '範圍', 1]];
       for (const [k, label, d] of rows) {
         if (next[k] == null) continue;
-        const cur = stats[k] ?? def.levels?.[level - 1]?.[k];
+        const cur = (k === 'light' ? lightR : stats[k]) ?? def.levels?.[level - 1]?.[k];
         if (cur != null && Math.abs(cur - next[k]) < 1e-6) continue;
         diff.append(h('span', { class: 'tm-drow' }, h('em', null, label), cur != null ? h('s', null, fmt(cur, d)) : null, icon('next'), h('b', null, fmt(next[k], d))));
       }
@@ -221,7 +236,7 @@ export function createMenus(ui) {
         if (!b) return;
         const bd = def.branches?.[k] || {};
         const facts = [];
-        if (bd.damage != null) facts.push(`傷害 ${fmt(bd.damage)}`);
+        if (bd.damage != null) facts.push(`傷害 ${fmt(bd.damage)}${needsLight ? '/秒' : ''}`);
         if (bd.range != null) facts.push(`射程 ${fmt(bd.range)}`);
         const why = h('span', { class: 'tm-why' }, '');
         const card = h('button', { type: 'button', class: 'tm-br', dataset: { branch: k }, onclick: () => doBranch(k) },
@@ -242,8 +257,8 @@ export function createMenus(ui) {
       sellTxt, h('span', { class: 'tm-cost' }, '+', icon('coin'), String(sellValue)), h('kbd', { class: 'ui-key' }, 'Del'));
     const foot = h('div', { class: 'tm-foot' }, sellBtn);
 
-    const panel = h('div', { class: 'tm ui-panel' + (upgradeInfo.kind === 'branch' ? ' is-branch' : ''), role: 'dialog', 'aria-label': def.name || '塔' },
-      h('i', { class: 'tm-arrow' }), head, chips, body, foot);
+    const panel = h('div', { class: 'tm ui-panel' + (upgradeInfo.kind === 'branch' ? ' is-branch' : '') + (isLight ? ' is-lantern' : ''), role: 'dialog', 'aria-label': def.name || '塔' },
+      h('i', { class: 'tm-arrow' }), head, chips, warn, body, foot);
     layer.append(panel);
 
     open = { kind: 'tower', el: panel, data, actions, sellBtn, sellTxt, sellArmed: false, sellTimer: 0 };

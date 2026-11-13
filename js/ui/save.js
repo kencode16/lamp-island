@@ -3,6 +3,8 @@
 // loadProgress() 在同一次執行中回傳「同一個物件」，main 與 UI 共用，避免兩份進度互相覆蓋。
 
 import { TALENTS } from '../data/talents.js';
+import { HEROES } from '../data/heroes.js';
+import { CHAPTERS, chapterOf, lastLevelOf, isChapterUnlocked } from './chapters.js';
 
 const KEY = 'shoudeng-island.progress.v1';
 export const DEFAULT_SETTINGS = Object.freeze({ music: 0.6, sfx: 0.8, quality: 'high' });
@@ -11,7 +13,7 @@ let memoryCopy = null;   // localStorage 失敗時的備援
 let cached = null;
 
 function defaults() {
-  return { stars: {}, best: {}, talents: [], settings: { ...DEFAULT_SETTINGS } };
+  return { stars: {}, best: {}, talents: [], hero: 'knight', settings: { ...DEFAULT_SETTINGS } };
 }
 
 const clamp01 = (v, d) => (typeof v === 'number' && isFinite(v) ? Math.min(1, Math.max(0, v)) : d);
@@ -35,6 +37,8 @@ function normalize(raw) {
     const ok = new Set(TALENTS.map(t => t.id));
     p.talents = [...new Set(raw.talents.filter(id => ok.has(id)))];
   }
+  // v2.0：上次選的英雄（舊存檔沒有這欄＝騎士）
+  if (typeof raw.hero === 'string' && HEROES[raw.hero]) p.hero = raw.hero;
   const s = raw.settings || {};
   p.settings = {
     music: clamp01(s.music, DEFAULT_SETTINGS.music),
@@ -52,7 +56,7 @@ function readRaw() {
   return memoryCopy;
 }
 
-/** 讀取進度。回傳 { stars, best, talents, settings }，同一次執行中是同一個物件。 */
+/** 讀取進度。回傳 { stars, best, talents, hero, settings }，同一次執行中是同一個物件。 */
 export function loadProgress() {
   if (cached) return cached;
   let raw = null;
@@ -94,6 +98,40 @@ export function starsAvailable(p) { return Math.max(0, starsEarned(p) - starsSpe
 export function isLevelUnlocked(p, levelId) {
   const id = Number(levelId);
   return id <= 1 || (p?.stars?.[id - 1] || 0) >= 1;
+}
+
+export { isChapterUnlocked };
+
+/** 英雄是否可選：unlockAfter＝通過第幾關後解鎖（0＝一開始就能選） */
+export function isHeroUnlocked(p, heroId) {
+  const def = HEROES[heroId];
+  if (!def) return false;
+  const after = def.unlockAfter | 0;
+  return after <= 0 || (p?.stars?.[after] || 0) >= 1;
+}
+
+/** 出發要用的英雄：上次選的（progress.hero）還沒解鎖就退回騎士 */
+export function chosenHero(p) {
+  const id = p?.hero;
+  return id && isHeroUnlocked(p, id) ? id : 'knight';
+}
+
+/**
+ * 過關「之前」呼叫：這一關第一次過關會解鎖什麼（給結算畫面的 unlocks）。
+ * 回傳 [{ kind: 'hero', id }, { kind: 'chapter', id }]；已經過過這關就回傳 []。
+ * levels 可省略（省略時每章當 10 關算，第二章一定列出）。
+ */
+export function unlocksForClear(p, levelId, levels) {
+  const id = Number(levelId);
+  if (!p || (p.stars?.[id] || 0) >= 1) return [];
+  const out = [];
+  for (const k in HEROES) if ((HEROES[k].unlockAfter | 0) === id) out.push({ kind: 'hero', id: k });
+  for (const ch of CHAPTERS) {
+    if (ch.id <= 1) continue;
+    const hasLevels = !levels || levels.some(l => chapterOf(l) === ch.id);
+    if (hasLevels && lastLevelOf(levels, ch.id - 1) === id) out.push({ kind: 'chapter', id: ch.id });
+  }
+  return out;
 }
 
 /** 把一場結果寫進進度（星數、最佳燈光都取最大值）並存檔。回傳是否有更新。 */

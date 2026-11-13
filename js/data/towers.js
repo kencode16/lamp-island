@@ -1,7 +1,7 @@
 // 塔的資料（擁有者：模擬核心 A。欄位格式見 架構.md §4，數值可調、欄位名稱不可改）
 // 距離單位＝格；rate＝每秒攻擊次數；damage＝每發傷害（treant 為每次脈衝傷害）
 
-export const TOWER_ORDER = ['archer', 'catapult', 'mage', 'treant'];
+export const TOWER_ORDER = ['archer', 'catapult', 'mage', 'treant', 'prism', 'lantern'];
 
 export const TOWERS = {
   archer: {
@@ -55,5 +55,31 @@ export const TOWERS = {
       a: { name: '荊棘林', desc: '更大範圍的荊棘，持續造成傷害。', cost: 200, damage: 18, rate: 1.0, range: 2.6, special: { slow: 0.55, slowSec: 1.2 } },
       b: { name: '古樹', desc: '每 4 秒定身最多 3 個敵人 1.5 秒。', cost: 220, damage: 30, rate: 0.25, range: 2.6, special: { root: 1.5, rootTargets: 3, slow: 0.4, slowSec: 1.5 } },
     },
+  },
+  // ===== 第二章（v2.0，初版數值由整合者先填，A 接手調整；id 與欄位名稱不可改） =====
+  prism: {
+    name: '水晶稜鏡塔', icon: '💎', unlock: 11, air: true, dmgType: 'magic', projectile: 'laser', needsLight: true,
+    desc: '要蓋在光裡才會運作。把光折射成雷射持續照射，鎖定越久傷害越高；被照到的怪物也會被照亮。',
+    // damage＝每秒傷害（持續雷射）；ramp＝鎖定同一目標 rampSec 秒後傷害倍率達到 ramp
+    levels: [
+      { cost: 110, damage: 10, rate: 1, range: 3.0, special: { ramp: 2.0, rampSec: 3 } },
+      { cost: 100, damage: 16, rate: 1, range: 3.2, special: { ramp: 2.0, rampSec: 3 } },
+      { cost: 140, damage: 26, rate: 1, range: 3.4, special: { ramp: 2.0, rampSec: 3 } },
+    ],
+    branches: {
+      a: { name: '分光', desc: '雷射分成三道，同時照射三個目標。', cost: 240, damage: 22, rate: 1, range: 3.5, special: { beams: 3, ramp: 2.0, rampSec: 3 } },
+      b: { name: '聚焦', desc: '單一雷射超高傷害，貫穿整排怪物。', cost: 260, damage: 60, rate: 1, range: 4.0, special: { pierce: true, ramp: 2.5, rampSec: 3 } },
+    },
+  },
+  lantern: {
+    name: '燈籠', icon: '🏮', unlock: 11, kind: 'light', air: false, dmgType: null, projectile: null,
+    desc: '不會攻擊，照亮周圍，讓塔看得到暗處的怪物。可以放在石台或洞窟地面上。',
+    // light＝照亮半徑（格）；range 同 light（給選單與射程圈顯示）；沒有第 4 級分支
+    levels: [
+      { cost: 30, damage: 0, rate: 0, range: 2.6, light: 2.6 },
+      { cost: 35, damage: 0, rate: 0, range: 3.3, light: 3.3 },
+      { cost: 50, damage: 0, rate: 0, range: 4.0, light: 4.0 },
+    ],
+    branches: null,
   },
 };

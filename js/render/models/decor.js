@@ -4,7 +4,8 @@
 // 例外（不要合併）：userData.animated = true 的 mesh（風車葉片），以及 Sprite（光暈）。
 import * as THREE from 'three';
 import { C, halo } from '../palette.js';
-import { part, mulberry32, PI, TAU } from './lib.js';
+import { part, glowPart, mulberry32, PI, TAU } from './lib.js';
+import { CAVE_DEF, CAVE_ALT, CAVE_ALT_DEF } from './cave.js';
 
 const H2 = PI / 2;
 const pick = (r, arr) => arr[Math.floor(r() * arr.length) % arr.length];
@@ -308,26 +309,37 @@ const DEF = {
   },
 };
 
+// 第二章的新裝飾併進同一張表（stalagmite glowshroom cavecrystal minecart）
+Object.assign(DEF, CAVE_DEF);
+const ALL = { ...DEF, ...CAVE_ALT_DEF };
+
 // ---------------------------------------------------------------------------
-/** makeDecor(kind, rng)：kind 見 架構.md §6；rng() 回傳 0–1 */
-export function makeDecor(kind, rng = Math.random) {
-  const def = DEF[kind] || DEF.bush;
-  const k = DEF[kind] ? kind : 'bush';
+/**
+ * makeDecor(kind, rng, theme)：kind 見 架構.md §6＋架構_第二章.md §3；rng() 回傳 0–1。
+ * theme === 'cave'：第一章的 kind 換成洞窟版（見 cave.js 的 CAVE_ALT），新的洞窟 kind 不論 theme 都一樣。
+ */
+export function makeDecor(kind, rng = Math.random, theme) {
+  let k = DEF[kind] ? kind : 'bush';
+  if (theme === 'cave' && CAVE_ALT[k]) k = CAVE_ALT[k];
+  const def = ALL[k];
   const v = Math.floor(rng() * def.n) % def.n;
   const g = new THREE.Group();
   g.name = `decor:${k}`;
-  const m = part(`decor:${k}:${v}`, (b) => def.build(b, mulberry32(1000 + v * 97 + k.length * 13), v), {
+  g.userData = { kind: 'decor', type: k, variant: v };
+  const seed = 1000 + v * 97 + k.length * 13;
+  const m = part(`decor:${k}:${v}`, (b) => def.build(b, mulberry32(seed), v), {
     receive: k === 'house' || k === 'windmill' || k === 'dock', cast: !def.noShadow, seed: v + 1,
   });
   g.add(m);
-  def.extra?.(g, v);
+  let gm = null;
+  if (def.glow) { gm = glowPart(`decor:${k}:${v}:glow`, (b) => def.glow(b, mulberry32(seed), v), { seed: v + 1 }); g.add(gm); }
+  def.extra?.(g, v, m, gm);
   if (def.rot) g.rotation.y = rng() * TAU;
   else g.rotation.y = (rng() - 0.5) * 0.04;
   if (def.rotJitter) g.rotation.y = (rng() - 0.5) * def.rotJitter;
   const s = def.scale[0] + (def.scale[1] - def.scale[0]) * rng();
   g.scale.setScalar(s);
-  g.userData = { kind: 'decor', type: k, variant: v };
   return g;
 }
 export const DECOR_KINDS = Object.keys(DEF);
-export const DECOR_VARIANTS = Object.fromEntries(Object.entries(DEF).map(([k, d]) => [k, d.n]));
+export const DECOR_VARIANTS = Object.fromEntries(Object.entries(ALL).map(([k, d]) => [k, d.n]));

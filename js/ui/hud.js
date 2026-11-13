@@ -1,15 +1,17 @@
 // 遊戲中 HUD（擁有者：D 介面）
 // update(state) 每幀呼叫：只有數值改變時才碰 DOM（不重建、不 new 元素）。
 
-import { h, icon } from './dom.js';
-import { SKILLS, SKILL_ORDER, HEROES } from '../data/heroes.js';
+import { h, icon, ICON, heroIcon } from './dom.js';
+import { SKILLS, SKILL_ORDER, HEROES, HERO_SKILLS } from '../data/heroes.js';
 
 const HP_C = 2 * Math.PI * 28;     // 英雄血量圈周長（viewBox 64，r=28）
 const WAVE_C = 2 * Math.PI * 16;   // 叫波倒數圈周長（viewBox 40，r=16）
+const HS_C = 2 * Math.PI * 27;     // 英雄技能冷卻環周長（viewBox 60，r=27）
 const SKILL_KEYS = { meteor: 'Z', freeze: 'X' };
+export const HERO_SKILL_KEYS = ['C', 'V'];
 
 export function createHUD(act) {
-  // act：ui.js 提供的動作 { pauseToggle, speedToggle, callWave, skill(id), hero() }
+  // act：ui.js 提供的動作 { pauseToggle, speedToggle, callWave, skill(id), heroSkill(id), hero() }
   const prev = Object.create(null);
   const changed = (k, v) => (prev[k] === v ? false : ((prev[k] = v), true));
 
@@ -53,18 +55,54 @@ export function createHUD(act) {
     h('div', { class: 'hud-mid' }, call),
     h('div', { class: 'hud-ctrl' }, speed, pause));
 
-  // ---- 左下：英雄 ----
-  const heroDef = HEROES.knight || { name: '守燈騎士' };
+  // ---- 左下：英雄（頭像依 state.hero.type）＋兩顆英雄技能 ----
   const hpArc = svgEl('circle', { cx: 32, cy: 32, r: 28, class: 'hero-arc', 'stroke-dasharray': HP_C.toFixed(2), 'stroke-dashoffset': '0' });
   const heroRing = svgEl('svg', { viewBox: '0 0 64 64', class: 'hero-ring' }, [svgEl('circle', { cx: 32, cy: 32, r: 28, class: 'hero-track' }), hpArc]);
   const heroLv = h('b', { class: 'hero-lv' }, '1');
   const heroDead = h('span', { class: 'hero-dead' }, '');
   const heroHp = h('span', { class: 'hero-hp' }, '');
   const heroXp = h('i');
-  const heroBtn = h('button', { type: 'button', class: 'hero-btn', 'aria-label': heroDef.name, onclick: () => act.hero() },
-    heroRing, icon('knight', 'hero-face'), heroLv, heroDead);
-  const hero = h('div', { class: 'hud-hero' }, heroBtn,
-    h('div', { class: 'hero-info' }, h('b', { class: 'hero-name' }, heroDef.name), heroHp, h('span', { class: 'hero-xp' }, heroXp)));
+  const heroFace = h('span', { class: 'ui-ico hero-face', 'aria-hidden': 'true' });
+  const heroName = h('b', { class: 'hero-name' }, '');
+  const heroBtn = h('button', { type: 'button', class: 'hero-btn', onclick: () => act.hero() },
+    heroRing, heroFace, heroLv, heroDead);
+  const hsBox = h('div', { class: 'hero-skills' });
+  const hero = h('div', { class: 'hud-hero' }, heroBtn, hsBox,
+    h('div', { class: 'hero-info' }, heroName, heroHp, h('span', { class: 'hero-xp' }, heroXp)));
+  let heroType = null;
+  let hsEls = {};          // skillId → { btn, num, arc, order }
+  let hsOrder = [];
+
+  function setHeroType(type) {
+    const def = HEROES[type] || HEROES.knight || { name: '守燈騎士', skills: [] };
+    heroType = HEROES[type] ? type : 'knight';
+    heroFace.innerHTML = ICON[heroIcon(heroType)];
+    heroName.textContent = def.name;
+    heroBtn.setAttribute('aria-label', def.name);
+    hero.dataset.hero = heroType;
+    hsBox.textContent = '';
+    hsEls = {}; hsOrder = [];
+    (def.skills || []).forEach((id, i) => {
+      const sd = HERO_SKILLS[id];
+      if (!sd) return;
+      const arc = svgEl('circle', { cx: 30, cy: 30, r: 27, class: 'hs-arc', 'stroke-dasharray': HS_C.toFixed(2), 'stroke-dashoffset': '0' });
+      const ring = svgEl('svg', { viewBox: '0 0 60 60', class: 'hs-ring' }, [svgEl('circle', { cx: 30, cy: 30, r: 27, class: 'hs-track' }), arc]);
+      const num = h('b', { class: 'hs-num' }, '');
+      const btn = h('button', {
+        type: 'button', class: 'hskill is-hidden', dataset: { skill: id }, 'aria-label': sd.name, title: `${sd.name}：${sd.desc || ''}`,
+        onclick: () => act.heroSkill(id),
+      },
+        h('span', { class: 'hs-ico' }, sd.icon || '✦'), ring, num,
+        h('span', { class: 'hs-lock' }, icon('lock'), h('small', null, `Lv${sd.minLevel || 1}`)),
+        h('kbd', { class: 'ui-key' }, HERO_SKILL_KEYS[i] || ''),
+        h('span', { class: 'sk-name hs-name' }, sd.name));
+      hsEls[id] = { btn, num, arc, order: i };
+      hsOrder.push(id);
+      hsBox.append(btn);
+    });
+    for (const k in prev) if (k.startsWith('hs')) delete prev[k];
+  }
+  setHeroType('knight');
 
   // ---- 右下：技能 ----
   const skillEls = {};
@@ -110,6 +148,7 @@ export function createHUD(act) {
   function setPaused(p) { pause.classList.toggle('is-on', !!p); }
   function setTargeting(id) {
     for (const k in skillEls) skillEls[k].btn.classList.toggle('is-targeting', k === id);
+    for (const k in hsEls) hsEls[k].btn.classList.toggle('is-targeting', k === id);
   }
   function setHeroSelected(on) { heroBtn.classList.toggle('is-selected', !!on); }
 
@@ -188,6 +227,8 @@ export function createHUD(act) {
     // 英雄
     const hr = s.hero;
     if (hr) {
+      const type = hr.type || 'knight';
+      if (type !== heroType) setHeroType(type);
       const dead = hr.state === 'dead';
       if (changed('hDead', dead)) { heroBtn.classList.toggle('is-dead', dead); hero.classList.toggle('is-dead', dead); }
       const frac = dead ? 0 : Math.max(0, Math.min(1, (hr.hp ?? 0) / (hr.maxHp || 1)));
@@ -205,10 +246,37 @@ export function createHUD(act) {
       const xpF = hr.xpNext ? Math.max(0, Math.min(1, (hr.xp ?? 0) / hr.xpNext)) : 1;
       const xpW = (xpF * 100).toFixed(0) + '%';
       if (changed('hXp', xpW)) heroXp.style.width = xpW;
+
+      // 英雄技能：hero.skills = { [id]: { cd, cdMax, unlocked /*等級夠*/, ready } }（sim 還沒給就不顯示）
+      const hs = hr.skills;
+      for (const id in hsEls) {
+        const st = hs && hs[id];
+        const e = hsEls[id];
+        if (changed('hsH_' + id, !!st)) e.btn.classList.toggle('is-hidden', !st);
+        if (!st) continue;
+        const unlocked = !!st.unlocked;
+        if (changed('hsU_' + id, unlocked)) e.btn.classList.toggle('is-locked', !unlocked);
+        const cd = Math.max(0, st.cd || 0);
+        const cooling = unlocked && cd > 0;
+        const ready = unlocked && !cooling && !dead && st.ready !== false;
+        if (changed('hsR_' + id, ready)) e.btn.classList.toggle('is-ready', ready);
+        if (changed('hsC_' + id, cooling)) e.btn.classList.toggle('is-cooling', cooling);
+        const frac = cooling ? Math.min(1, cd / Math.max(0.001, st.cdMax || cd)) : 0;
+        const off = (HS_C * frac).toFixed(1);
+        if (changed('hsO_' + id, off)) e.arc.setAttribute('stroke-dashoffset', off);
+        const sec = cooling ? String(Math.ceil(cd)) : '';
+        if (changed('hsS_' + id, sec)) e.num.textContent = sec;
+      }
     }
   }
 
-  return { el, update, reset, setSpeed, setPaused, setTargeting, setHeroSelected, skillButton: id => skillEls[id]?.btn, callButton: call };
+  return {
+    el, update, reset, setSpeed, setPaused, setTargeting, setHeroSelected,
+    skillButton: id => skillEls[id]?.btn, callButton: call,
+    heroSkillButton: id => hsEls[id]?.btn,
+    heroSkillIds: () => hsOrder.slice(),
+    get heroType() { return heroType; },
+  };
 }
 
 // 數值變化時的小動畫（Web Animations，不觸發版面重算）

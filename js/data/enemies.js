@@ -1,7 +1,7 @@
 // 敵人資料（擁有者：模擬核心 A。欄位格式見 架構.md §4，數值可調、id 與欄位名稱不可改）
 // speed＝格/秒；atk＝被英雄擋住時每秒打英雄的傷害（物理，會被英雄護甲減免）；armor＝物理減傷比例；mres＝魔法減傷比例；lamp＝漏掉時扣的燈光；size＝模型縮放參考
 
-export const ENEMY_ORDER = ['slime', 'splitter', 'goblin', 'skeleton', 'gargoyle', 'bat', 'golem', 'shaman', 'slimeKing', 'nightLord'];
+export const ENEMY_ORDER = ['slime', 'splitter', 'goblin', 'skeleton', 'gargoyle', 'bat', 'golem', 'shaman', 'slimeKing', 'nightLord', 'ghost', 'mole', 'inkBat', 'moleKing', 'abyssWorm'];
 
 export const ENEMIES = {
   slime:     { name: '史萊姆',     desc: '最常見的小怪，又軟又慢。', hp: 30, speed: 1.0, armor: 0, mres: 0, gold: 4, lamp: 1, atk: 5, flying: false, size: 0.6 },
@@ -15,4 +15,10 @@ export const ENEMIES = {
   shaman:    { name: '暗影巫師',   desc: '每隔幾秒替附近的怪物加上護盾。', hp: 110, speed: 0.8, armor: 0.1, mres: 0.5, gold: 14, lamp: 2, atk: 10, flying: false, size: 0.75, special: { shieldAura: { amount: 30, radius: 2, every: 5 } } },
   slimeKing: { name: '史萊姆王',   desc: '巨大的史萊姆，血量降到三分之二和三分之一時會分裂出手下。', hp: 2500, speed: 0.45, armor: 0.2, mres: 0.2, gold: 150, lamp: 5, atk: 60, flying: false, size: 2.0, boss: true, special: { splitAt: [0.66, 0.33], splitInto: 'splitter', splitCount: 4 } },
   nightLord: { name: '夜之君主',   desc: '最終的王，會召喚夜蝠，還會熄滅附近塔的光讓射程變短。', hp: 6000, speed: 0.4, armor: 0.4, mres: 0.4, gold: 300, lamp: 5, atk: 90, flying: false, size: 2.0, boss: true, special: { summon: { type: 'bat', count: 4, every: 12 }, dim: { radius: 4, rangeMul: 0.7, sec: 5, every: 20 } } },
+  // ===== 第二章（v2.0）初版數值，A 接手調整 =====
+  ghost:     { name: '影子幽靈',   desc: '在暗處完全隱形，只有走進光裡才看得到、打得到。', hp: 55, speed: 1.4, armor: 0, mres: 0.3, gold: 7, lamp: 1, atk: 6, flying: false, size: 0.65, special: { shadow: true } },
+  mole:      { name: '挖洞地鼠',   desc: '靠近塔時會鑽進地底潛行一段，這段時間打不到。', hp: 80, speed: 1.0, armor: 0.2, mres: 0, gold: 8, lamp: 1, atk: 8, flying: false, size: 0.6, special: { burrow: { trigger: 2.0, dist: 3.5, speed: 1.6, cooldown: 6 } } },
+  inkBat:    { name: '噴墨蝙蝠',   desc: '會飛，飛過燈籠時噴墨，讓燈籠熄滅幾秒。', hp: 40, speed: 1.5, armor: 0, mres: 0, gold: 5, lamp: 1, atk: 3, flying: true, size: 0.5, special: { ink: { radius: 1.2, sec: 5, cooldown: 4 } } },
+  moleKing:  { name: '地鼠王',     desc: '巨大的地鼠，一次鑽地就跨過一大段路，還會叫出成群的地鼠。', hp: 4200, speed: 0.45, armor: 0.35, mres: 0.2, gold: 200, lamp: 5, atk: 70, flying: false, size: 1.8, boss: true, special: { burrow: { every: 14, dist: 6, speed: 2.0 }, summon: { type: 'mole', count: 3, every: 16 } } },
+  abyssWorm: { name: '深淵巨蟲',   desc: '從地底竄出的巨蟲，會吞掉附近的燈籠；身體分成好幾節，要一節一節打掉。', hp: 9000, speed: 0.38, armor: 0.3, mres: 0.3, gold: 400, lamp: 5, atk: 110, flying: false, size: 2.2, boss: true, special: { segments: 6, eatLantern: { radius: 1.4, every: 6 }, burrow: { every: 18, dist: 5, speed: 1.6 } } },
 };

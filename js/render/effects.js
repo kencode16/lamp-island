@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import * as ENEMY_DATA from '../data/enemies.js';
 import * as HERO_DATA from '../data/heroes.js';
+import { DK_GLSL_SAMPLE } from './env/darkness.js';
 
 const TAU = Math.PI * 2;
 const C = (h) => new THREE.Color(h);
@@ -24,8 +25,20 @@ const COL = {
   goo: C('#9ae860'), gooEnd: C('#3a9a30'),
   heal: C('#b0ffd0'), holy: C('#fff2b0'), holyEnd: C('#ffb84a'),
   ice: C('#bfefff'), orange: C('#ff9a3a'), blue: C('#7fc8ff'),
+  // v2.0 第二章＋英雄
+  fairy: C('#a8ffc8'), fairyEnd: C('#2fbf9a'), fairyPink: C('#ffb6f2'), fairyCore: C('#f4fff0'),
+  star: C('#fff4b8'), starEnd: C('#ffbe3a'),
+  pink: C('#ffb3dc'), pinkEnd: C('#d0609e'), pollen: C('#fff07a'),
+  fireCore: C('#fff0b0'), lava: C('#ff6a1a'),
+  ink: C('#2c1a3c'), inkEnd: C('#0c0612'), inkSplat: C('#1a0e24'),
+  dirt: C('#8a6a48'), dirtEnd: C('#4c3826'), dirtDark: C('#3a2a1c'),
+  ghost: C('#d6f8ff'), ghostEnd: C('#4aa6d0'),
+  worm: C('#a050c8'), wormEnd: C('#2a0c3a'), wormGoo: C('#7ae05a'),
+  prism: C('#9fe8ff'), prismA: C('#7ff6ff'), prismB: C('#ff86ea'), prismC: C('#ffe27a'), focus: C('#c8fbff'),
+  lantern: C('#ffc46a'), lanternEnd: C('#ff7a2a'), crystalGlow: C('#a88cff'),
 };
 const rand = Math.random;
+const BIG_BURROWERS = new Set(['abyssWorm', 'moleKing']);
 const _c = new THREE.Color();
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3();
@@ -146,7 +159,8 @@ class EventQuads {
     this.live = Math.max(this.live, 1);
   }
   update(dt) {
-    if (!this.live) { this.mesh.count = 0; return; }
+    if (!this.live) { this.mesh.count = 0; this.mesh.visible = false; return; }
+    this.mesh.visible = true;
     const d = this.d;
     let top = 0, live = 0;
     for (let i = 0; i < this.max; i++) {
@@ -200,6 +214,7 @@ class FrameQuads {
   }
   end() {
     this.mesh.count = this.n;
+    this.mesh.visible = this.n > 0;
     if (this.n) {
       this.mesh.instanceMatrix.needsUpdate = true;
       this.mesh.instanceColor.needsUpdate = true;
@@ -214,10 +229,20 @@ attribute float aSize;
 attribute vec4 aColor;
 uniform float uScale;
 varying vec4 vColor;
+#ifdef DK_DIM
+${DK_GLSL_SAMPLE}
+#endif
 void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   gl_PointSize = aSize * uScale / max(0.1, -mv.z);
   vColor = aColor;
+  #ifdef DK_DIM
+  // 第二章黑暗：一般混合的粒子（煙、碎屑）在暗處跟著變暗；第一章 uDkOn = 0 不變
+  if (uDkOn > 0.0) {
+    vec4 L = dkLit((modelMatrix * vec4(position, 1.0)).xz);
+    vColor.rgb *= mix(1.0, 0.16 + 0.84 * L.r, uDkOn);
+  }
+  #endif
   gl_Position = projectionMatrix * mv;
 }`;
 const PART_FRAG = /* glsl */`
@@ -227,13 +252,19 @@ void main() {
   vec2 p = gl_PointCoord * 2.0 - 1.0;
   float d = dot(p, p);
   if (d > 1.0) discard;
-  float a = mix(pow(1.0 - d, 1.6), smoothstep(1.0, 0.55, d), uHard);
+  float a;
+  if (uHard > 1.5) {
+    // 四角星芒（星塵、妖精光點、聖光）
+    vec2 q = abs(p);
+    float cross = max(0.0, 1.0 - q.x * 7.0) * max(0.0, 1.0 - q.y) + max(0.0, 1.0 - q.y * 7.0) * max(0.0, 1.0 - q.x);
+    a = clamp(cross * 1.2 + pow(max(0.0, 1.0 - d * 3.5), 2.0), 0.0, 1.0);
+  } else a = mix(pow(1.0 - d, 1.6), smoothstep(1.0, 0.55, d), uHard);
   gl_FragColor = vec4(vColor.rgb, vColor.a * a);
   #include <colorspace_fragment>
 }`;
 
 class Particles {
-  constructor(root, max, additive, renderOrder, hard = 0) {
+  constructor(root, max, additive, renderOrder, hard = 0, dk = null) {
     this.max = max; this.cursor = 0; this.live = 0;
     this.pos = new Float32Array(max * 3);
     this.vel = new Float32Array(max * 3);
@@ -254,8 +285,9 @@ class Particles {
     g.setAttribute('aSize', this.aSize);
     g.setAttribute('aColor', this.aCol);
     this.uniforms = { uScale: { value: 800 }, uHard: { value: hard } };
+    if (dk) for (const k of Object.keys(dk)) this.uniforms[k] = dk[k];
     this.points = new THREE.Points(g, new THREE.ShaderMaterial({
-      uniforms: this.uniforms, vertexShader: PART_VERT, fragmentShader: PART_FRAG,
+      uniforms: this.uniforms, vertexShader: PART_VERT, fragmentShader: PART_FRAG, defines: dk ? { DK_DIM: '' } : {},
       transparent: true, depthWrite: false, toneMapped: false,
       blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
     }));
@@ -277,7 +309,7 @@ class Particles {
     this.live++;
   }
   update(dt) {
-    if (this.live <= 0 && !this.dirty) return;
+    if (this.live <= 0 && !this.dirty) { this.points.visible = false; return; }
     let live = 0;
     const P = this.pos, V = this.vel;
     for (let i = 0; i < this.max; i++) {
@@ -299,6 +331,7 @@ class Particles {
     }
     this.dirty = live > 0 || this.live > 0;
     this.live = live;
+    this.points.visible = live > 0;   // 沒有粒子時不畫（省 draw call）
     this.aPos.needsUpdate = true; this.aSize.needsUpdate = true; this.aCol.needsUpdate = true;
   }
   clear() { this.life.fill(0); this.size.fill(0); this.live = 0; this.dirty = true; }
@@ -355,7 +388,8 @@ class Debris {
     this.live = 1;
   }
   update(dt) {
-    if (!this.live) { this.mesh.count = 0; return; }
+    if (!this.live) { this.mesh.count = 0; this.mesh.visible = false; return; }
+    this.mesh.visible = true;
     const d = this.d;
     let top = 0, live = 0;
     for (let i = 0; i < this.max; i++) {
@@ -411,7 +445,8 @@ class Spikes {
     this.live = 1;
   }
   update(dt) {
-    if (!this.live) { this.mesh.count = 0; return; }
+    if (!this.live) { this.mesh.count = 0; this.mesh.visible = false; return; }
+    this.mesh.visible = true;
     const d = this.d;
     let top = 0, live = 0;
     for (let i = 0; i < this.max; i++) {
@@ -657,14 +692,17 @@ class Slashes {
       const mesh = new THREE.Mesh(geo, mat);
       mesh.visible = false; mesh.renderOrder = 7;
       root.add(mesh);
-      this.slots.push({ mesh, life: 0, max: 0.24, yaw: 0, tilt: 0 });
+      this.slots.push({ mesh, life: 0, max: 0.24, yaw: 0, tilt: 0, size: 1, sweep: 1.2, alpha: 0.95 });
     }
     this.cursor = 0;
   }
-  emit(x, y, z, yaw) {
+  /** v2.0：可指定顏色、大小、揮動幅度、傾斜、壽命（第一章的呼叫方式不變） */
+  emit(x, y, z, yaw, color = null, size = 1, sweep = 1.2, tilt = null, life = 0.24, alpha = 0.95) {
     const s = this.slots[this.cursor]; this.cursor = (this.cursor + 1) % this.slots.length;
     s.mesh.position.set(x, y, z);
-    s.yaw = yaw; s.tilt = (rand() - 0.5) * 0.9;
+    s.yaw = yaw; s.tilt = tilt == null ? (rand() - 0.5) * 0.9 : tilt;
+    s.size = size; s.sweep = sweep; s.max = life; s.alpha = alpha;
+    s.mesh.material.color.copy(color || COL.warm);
     s.life = s.max; s.mesh.visible = true;
   }
   update(dt) {
@@ -673,10 +711,10 @@ class Slashes {
       s.life -= dt;
       if (s.life <= 0) { s.mesh.visible = false; continue; }
       const t = 1 - s.life / s.max;
-      s.mesh.rotation.set(s.tilt, s.yaw + (t - 0.5) * 1.2, 0, 'YXZ');
-      const k = 0.85 + t * 0.35;
+      s.mesh.rotation.set(s.tilt, s.yaw + (t - 0.5) * s.sweep, 0, 'YXZ');
+      const k = (0.85 + t * 0.35) * s.size;
       s.mesh.scale.set(k, k, k);
-      s.mesh.material.opacity = Math.sin(t * Math.PI) * 0.95;
+      s.mesh.material.opacity = Math.sin(t * Math.PI) * s.alpha;
     }
   }
   clear() { for (const s of this.slots) { s.life = 0; s.mesh.visible = false; } }
@@ -702,6 +740,312 @@ class Meteors {
     s.mesh.visible = false;
   }
   clear() { for (const s of this.slots) { s.active = false; s.mesh.visible = false; } }
+}
+
+const FIRE_DROP_MAT = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffe08a'), toneMapped: false });
+
+// ============================================================================ 第二章：稜鏡雷射（全部光束在同一個 mesh，一個 draw call）
+const BEAM_VERT = /* glsl */`
+attribute vec2 aUV;      // x：沿光束的距離（世界單位）、y：橫向 -1～1
+attribute vec4 aP;       // x：power、y：光束長度、z：亂數種子、w：樣式（0 一般、1 分光、2 聚焦）
+attribute vec3 aCol;
+varying vec2 vUV;
+varying vec4 vP;
+varying vec3 vCol;
+void main() { vUV = aUV; vP = aP; vCol = aCol; gl_Position = projectionMatrix * viewMatrix * vec4(position, 1.0); }`;
+const BEAM_FRAG = /* glsl */`
+uniform float uTime;
+varying vec2 vUV;
+varying vec4 vP;
+varying vec3 vCol;
+void main() {
+  float power = vP.x, len = vP.y, seed = vP.z;
+  float v = abs(vUV.y);
+  float core = exp(-v * v * 70.0);
+  float mid = exp(-v * v * 14.0);
+  float halo = exp(-v * v * 3.5) * (1.0 - smoothstep(0.75, 1.0, v));
+  // 沿光束往前流動的光脈衝＋螺旋光絲
+  float flow = 0.6 + 0.4 * sin(vUV.x * 7.0 - uTime * 16.0 + seed * 6.0);
+  float pulse = smoothstep(0.72, 1.0, fract(vUV.x * 0.9 - uTime * 2.6 + seed));
+  float strand = smoothstep(0.12, 0.0, abs(vUV.y - 0.42 * sin(vUV.x * 9.0 - uTime * 11.0 + seed * 3.0))) * (0.35 + 0.65 * power);
+  float ends = smoothstep(0.0, 0.18, vUV.x);
+  float tail = vP.w > 1.5 ? 1.0 - smoothstep(len * 0.72, len, vUV.x) * 0.9 : 1.0;
+  float bright = 0.65 + 0.55 * power;
+  vec3 col = vCol * (halo * 0.32 + mid * (0.65 + 0.35 * flow) + strand * 0.7 + pulse * mid * 0.6) + vec3(1.0) * core * (0.55 + 0.45 * pulse);
+  gl_FragColor = vec4(col * bright * ends * tail, 1.0);
+  #include <colorspace_fragment>
+}`;
+class Beams {
+  constructor(root, max = 24) {
+    this.max = max; this.n = 0;
+    const g = new THREE.BufferGeometry();
+    this.pos = new THREE.BufferAttribute(new Float32Array(max * 4 * 3), 3).setUsage(THREE.DynamicDrawUsage);
+    this.uv = new THREE.BufferAttribute(new Float32Array(max * 4 * 2), 2).setUsage(THREE.DynamicDrawUsage);
+    this.p = new THREE.BufferAttribute(new Float32Array(max * 4 * 4), 4).setUsage(THREE.DynamicDrawUsage);
+    this.col = new THREE.BufferAttribute(new Float32Array(max * 4 * 3), 3).setUsage(THREE.DynamicDrawUsage);
+    const idx = [];
+    for (let i = 0; i < max; i++) { const a = i * 4; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+    g.setIndex(idx);
+    g.setAttribute('position', this.pos); g.setAttribute('aUV', this.uv); g.setAttribute('aP', this.p); g.setAttribute('aCol', this.col);
+    this.uniforms = { uTime: { value: 0 } };
+    this.mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({
+      uniforms: this.uniforms, vertexShader: BEAM_VERT, fragmentShader: BEAM_FRAG,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false,
+    }));
+    this.mesh.frustumCulled = false; this.mesh.renderOrder = 8; this.mesh.visible = false;
+    g.setDrawRange(0, 0);
+    root.add(this.mesh);
+  }
+  begin() { this.n = 0; }
+  /** 一道光束：起點 a、終點 b（世界座標）、寬度、顏色、power、樣式、延伸（貫穿）長度 */
+  add(ax, ay, az, bx, by, bz, width, color, power, style, seed, camera, extend = 0) {
+    if (this.n >= this.max) return;
+    let dx = bx - ax, dy = by - ay, dz = bz - az;
+    const len0 = Math.hypot(dx, dy, dz) || 1e-3;
+    dx /= len0; dy /= len0; dz /= len0;
+    const len = len0 + extend;
+    const ex = ax + dx * len, ey = ay + dy * len, ez = az + dz * len;
+    // 面向鏡頭的側向量
+    const mx = (ax + ex) / 2, my = (ay + ey) / 2, mz = (az + ez) / 2;
+    _v2.set(camera.position.x - mx, camera.position.y - my, camera.position.z - mz);
+    _v.set(dx, dy, dz);
+    _v3.crossVectors(_v, _v2).normalize().multiplyScalar(width * 0.5);
+    const i = this.n++;
+    const P = this.pos.array, U = this.uv.array, Q = this.p.array, C = this.col.array;
+    const pts = [[ax - _v3.x, ay - _v3.y, az - _v3.z, 0, -1], [ax + _v3.x, ay + _v3.y, az + _v3.z, 0, 1],
+      [ex - _v3.x, ey - _v3.y, ez - _v3.z, len, -1], [ex + _v3.x, ey + _v3.y, ez + _v3.z, len, 1]];
+    for (let k = 0; k < 4; k++) {
+      const o = i * 4 + k;
+      P[o * 3] = pts[k][0]; P[o * 3 + 1] = pts[k][1]; P[o * 3 + 2] = pts[k][2];
+      U[o * 2] = pts[k][3]; U[o * 2 + 1] = pts[k][4];
+      Q[o * 4] = power; Q[o * 4 + 1] = len; Q[o * 4 + 2] = seed; Q[o * 4 + 3] = style;
+      C[o * 3] = color.r; C[o * 3 + 1] = color.g; C[o * 3 + 2] = color.b;
+    }
+  }
+  end(dt) {
+    this.uniforms.uTime.value = (this.uniforms.uTime.value + dt) % 1000;
+    this.mesh.visible = this.n > 0;
+    this.mesh.geometry.setDrawRange(0, this.n * 6);
+    if (this.n) { this.pos.needsUpdate = true; this.uv.needsUpdate = true; this.p.needsUpdate = true; this.col.needsUpdate = true; }
+  }
+}
+
+// ============================================================================ 第二章：旋風斬劍光環
+const SWIRL_FRAG = /* glsl */`
+uniform vec3 uColor, uCore;
+uniform float uAlpha, uRot, uInner;
+varying vec2 vUv;
+void main() {
+  vec2 p = vUv * 2.0 - 1.0;
+  float r = length(p);
+  if (r > 1.0 || r < uInner) discard;
+  float ang = atan(p.y, p.x) / 6.2831853 + 0.5;
+  // 兩道刀光：前緣最亮、往後拖出漸淡的尾巴
+  float a1 = fract(ang + uRot), a2 = fract(ang + uRot + 0.5);
+  float trail = pow(a1, 5.0) + pow(a2, 5.0) * 0.8;
+  float edge = smoothstep(uInner, uInner + 0.12, r) * (1.0 - smoothstep(0.9, 1.0, r));
+  float tip = smoothstep(0.72, 0.97, r);
+  vec3 col = mix(uColor, uCore, tip * trail);
+  gl_FragColor = vec4(col * trail * edge * uAlpha * (0.5 + tip), 1.0);
+  #include <colorspace_fragment>
+}`;
+class Swirls {
+  constructor(root, n = 3) {
+    const geo = new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2);
+    this.slots = [];
+    for (let i = 0; i < n; i++) {
+      const mat = new THREE.ShaderMaterial({
+        uniforms: { uColor: { value: new THREE.Color() }, uCore: { value: new THREE.Color('#ffffff') }, uAlpha: { value: 0 }, uRot: { value: 0 }, uInner: { value: 0.5 } },
+        vertexShader: BOLT_VERT.replace('viewMatrix * vec4', 'modelViewMatrix * vec4'), fragmentShader: SWIRL_FRAG,
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.visible = false; mesh.renderOrder = 8; mesh.frustumCulled = false;
+      root.add(mesh);
+      this.slots.push({ mesh, life: 0, max: 1, r: 1, turns: 2, follow: null, tilt: 0 });
+    }
+    this.cursor = 0;
+  }
+  emit(x, y, z, r, color, life = 0.55, turns = 2.2, follow = null, inner = 0.5, tilt = 0) {
+    const s = this.slots[this.cursor]; this.cursor = (this.cursor + 1) % this.slots.length;
+    s.mesh.position.set(x, y, z);
+    s.mesh.material.uniforms.uColor.value.copy(color);
+    s.mesh.material.uniforms.uInner.value = inner;
+    s.life = life; s.max = life; s.r = r; s.turns = turns; s.follow = follow; s.tilt = tilt;
+    s.mesh.visible = true;
+  }
+  update(dt) {
+    for (const s of this.slots) {
+      if (s.life <= 0) continue;
+      s.life -= dt;
+      if (s.life <= 0) { s.mesh.visible = false; continue; }
+      const t = 1 - s.life / s.max;
+      const u = s.mesh.material.uniforms;
+      u.uRot.value = -t * s.turns;
+      u.uAlpha.value = Math.min(1, t * 9) * (t > 0.6 ? (1 - t) / 0.4 : 1) * 1.4;
+      const k = s.r * (0.55 + 0.45 * (1 - Math.pow(1 - t, 3)));
+      s.mesh.scale.set(k, 1, k);
+      s.mesh.rotation.set(s.tilt * Math.sin(t * 6), 0, s.tilt * Math.cos(t * 6));
+      if (typeof s.follow === 'function') { const p = s.follow(); if (p) { s.mesh.position.x = p.x; s.mesh.position.z = p.z; } }
+    }
+  }
+  clear() { for (const s of this.slots) { s.life = 0; s.mesh.visible = false; } }
+}
+
+// ============================================================================ 第二章：地面光痕（聖燈衝鋒）
+const STREAK_FRAG = /* glsl */`
+uniform vec3 uColor, uCore;
+uniform float uAlpha, uTime, uHead;
+varying vec2 vUv;
+void main() {
+  float across = abs(vUv.y * 2.0 - 1.0);
+  float along = vUv.x;                       // 0 起點 → 1 終點
+  if (along > uHead) discard;
+  float body = (1.0 - smoothstep(0.25, 1.0, across)) * smoothstep(0.0, 0.25, along);
+  float core = 1.0 - smoothstep(0.0, 0.35, across);
+  float runes = 0.75 + 0.25 * sin(along * 40.0 - uTime * 18.0);
+  float head = smoothstep(uHead - 0.25, uHead, along);
+  vec3 col = mix(uColor, uCore, core * 0.7 + head * 0.5) * (body * runes + head * core * 1.5);
+  gl_FragColor = vec4(col * uAlpha, 1.0);
+  #include <colorspace_fragment>
+}`;
+class Streaks {
+  constructor(root, n = 3) {
+    const geo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2).translate(0.5, 0, 0);
+    this.slots = [];
+    for (let i = 0; i < n; i++) {
+      const mat = new THREE.ShaderMaterial({
+        uniforms: { uColor: { value: new THREE.Color() }, uCore: { value: new THREE.Color('#ffffff') }, uAlpha: { value: 0 }, uTime: { value: 0 }, uHead: { value: 1 } },
+        vertexShader: BOLT_VERT.replace('viewMatrix * vec4', 'modelViewMatrix * vec4'), fragmentShader: STREAK_FRAG,
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false,
+        polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.visible = false; mesh.renderOrder = 6; mesh.frustumCulled = false;
+      root.add(mesh);
+      this.slots.push({ mesh, life: 0, max: 1, grow: 0.3, age: 0 });
+    }
+    this.cursor = 0;
+  }
+  emit(ax, ay, az, bx, bz, width, color, life = 1.0, grow = 0.3) {
+    const s = this.slots[this.cursor]; this.cursor = (this.cursor + 1) % this.slots.length;
+    const len = Math.hypot(bx - ax, bz - az) || 0.01;
+    s.mesh.position.set(ax, ay, az);
+    s.mesh.rotation.set(0, Math.atan2(-(bz - az), bx - ax), 0);
+    s.mesh.scale.set(len, 1, width);
+    s.mesh.material.uniforms.uColor.value.copy(color);
+    s.life = life; s.max = life; s.grow = grow; s.age = 0;
+    s.mesh.visible = true;
+  }
+  update(dt) {
+    for (const s of this.slots) {
+      if (s.life <= 0) continue;
+      s.life -= dt; s.age += dt;
+      if (s.life <= 0) { s.mesh.visible = false; continue; }
+      const u = s.mesh.material.uniforms;
+      u.uTime.value += dt;
+      u.uHead.value = Math.min(1, s.age / Math.max(0.01, s.grow));
+      const t = 1 - s.life / s.max;
+      u.uAlpha.value = t > 0.45 ? Math.max(0, (1 - t) / 0.55) : 1;
+    }
+  }
+  clear() { for (const s of this.slots) { s.life = 0; s.mesh.visible = false; } }
+}
+
+// ============================================================================ 第二章：從天而降的冰柱
+class Shards {
+  constructor(root, n = 12) {
+    const geo = new THREE.ConeGeometry(1, 1, 6).rotateX(Math.PI).translate(0, 0.5, 0);   // 尖端朝下、底部在上
+    const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#cdf4ff'), toneMapped: false });
+    this.mesh = new THREE.InstancedMesh(geo, mat, n);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.frustumCulled = false; this.mesh.count = 0; this.mesh.renderOrder = 6;
+    root.add(this.mesh);
+    this.slots = [];
+    for (let i = 0; i < n; i++) this.slots.push({ active: false, delay: 0, t: 0, dur: 0.4, x: 0, y0: 6, y1: 0, z: 0, size: 0.2, onLand: null });
+    this.cursor = 0;
+  }
+  emit(x, y0, y1, z, dur, delay, size, onLand) {
+    const s = this.slots[this.cursor]; this.cursor = (this.cursor + 1) % this.slots.length;
+    Object.assign(s, { active: true, delay, t: 0, dur, x, y0, y1, z, size, onLand });
+  }
+  update(dt, emitTrail) {
+    let n = 0;
+    for (const s of this.slots) {
+      if (!s.active) continue;
+      if (s.delay > 0) { s.delay -= dt; continue; }
+      s.t += dt / s.dur;
+      const k = Math.min(1, s.t);
+      const y = s.y0 + (s.y1 - s.y0) * k * k;
+      _q.identity();
+      _m.compose(_v.set(s.x, y, s.z), _q, _s.set(s.size * 0.38, s.size * 2.6, s.size * 0.38));
+      this.mesh.setMatrixAt(n++, _m);
+      if (emitTrail) emitTrail(s.x, y + s.size * 1.6, s.z, s.size);
+      if (k >= 1) { s.active = false; if (s.onLand) s.onLand(s.x, s.y1, s.z, s.size); }
+    }
+    this.mesh.count = n;
+    this.mesh.visible = n > 0;
+    if (n) this.mesh.instanceMatrix.needsUpdate = true;
+  }
+  clear() { for (const s of this.slots) s.active = false; this.mesh.count = 0; }
+}
+
+// ============================================================================ 第二章：地鼠的土堆（事件土堆＋潛地中跟著走的隆起）
+class Mounds {
+  constructor(root, max = 48) {
+    const geo = new THREE.SphereGeometry(1, 9, 4, 0, TAU, 0, Math.PI / 2);
+    const a = geo.attributes.position.array;
+    for (let i = 0; i < a.length; i += 3) {
+      if (a[i + 1] < 0.02) continue;
+      const k = 0.82 + 0.36 * Math.abs(Math.sin(a[i] * 13.1 + a[i + 2] * 7.7 + a[i + 1] * 5.3));
+      a[i] *= k; a[i + 2] *= k; a[i + 1] *= 0.8 + 0.4 * Math.abs(Math.sin(a[i] * 9.1 - a[i + 2] * 4.3));
+    }
+    geo.computeVertexNormals();
+    this.max = max;
+    this.mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ flatShading: true }), max);
+    this.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(max * 3), 3);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.frustumCulled = false; this.mesh.count = 0; this.mesh.visible = false; this.mesh.receiveShadow = true;
+    root.add(this.mesh);
+    this.ev = [];
+    for (let i = 0; i < 16; i++) this.ev.push({ life: 0, max: 1, x: 0, y: 0, z: 0, r: 0.3, h: 0.15, rot: 0, c: new THREE.Color() });
+    this.cursor = 0;
+    this.fr = []; this.nf = 0;
+    for (let i = 0; i < max - 16; i++) this.fr.push({ x: 0, y: 0, z: 0, r: 0.3, h: 0.1, rot: 0, c: new THREE.Color() });
+  }
+  emit(x, y, z, r, h, life, color) {
+    const e = this.ev[this.cursor]; this.cursor = (this.cursor + 1) % this.ev.length;
+    Object.assign(e, { life, max: life, x, y, z, r, h, rot: rand() * TAU }); e.c.copy(color);
+  }
+  begin() { this.nf = 0; }
+  add(x, y, z, r, h, rot, color) {
+    if (this.nf >= this.fr.length) return;
+    const f = this.fr[this.nf++];
+    f.x = x; f.y = y; f.z = z; f.r = r; f.h = h; f.rot = rot; f.c.copy(color);
+  }
+  update(dt) {
+    let n = 0;
+    for (const e of this.ev) {
+      if (e.life <= 0) continue;
+      e.life -= dt;
+      if (e.life <= 0) continue;
+      const t = 1 - e.life / e.max;
+      const k = t < 0.08 ? t / 0.08 : t > 0.7 ? (1 - t) / 0.3 : 1;   // 冒起 → 停留 → 沉下去
+      _q.setFromAxisAngle(_up, e.rot);
+      _m.compose(_v.set(e.x, e.y, e.z), _q, _s.set(e.r * (0.7 + 0.3 * k), e.h * k + 0.001, e.r * (0.7 + 0.3 * k)));
+      this.mesh.setMatrixAt(n, _m); this.mesh.setColorAt(n, e.c); n++;
+    }
+    for (let i = 0; i < this.nf; i++) {
+      const f = this.fr[i];
+      _q.setFromAxisAngle(_up, f.rot);
+      _m.compose(_v.set(f.x, f.y, f.z), _q, _s.set(f.r, f.h, f.r));
+      this.mesh.setMatrixAt(n, _m); this.mesh.setColorAt(n, f.c); n++;
+    }
+    this.mesh.count = n;
+    this.mesh.visible = n > 0;
+    if (n) { this.mesh.instanceMatrix.needsUpdate = true; this.mesh.instanceColor.needsUpdate = true; }
+  }
+  clear() { for (const e of this.ev) e.life = 0; this.nf = 0; this.mesh.count = 0; this.mesh.visible = false; }
 }
 
 // ============================================================================ 持續狀態用的 shader（護盾泡泡）
@@ -746,8 +1090,8 @@ export function createEffects(world) {
   const atlas = makeAtlas();
 
   const add = new Particles(root, 1600, true, 9, 0);
-  const smoke = new Particles(root, 600, false, 8, 0);
-  const hard = new Particles(root, 400, false, 8, 1);   // 實心小顆粒（金幣、黏液、葉子、雪）
+  const smoke = new Particles(root, 600, false, 8, 0, world.darkUniforms || null);
+  const hard = new Particles(root, 400, false, 8, 1, world.darkUniforms || null);   // 實心小顆粒（金幣、黏液、葉子、雪）
   const rings = new EventQuads(root, 48, true, atlas, 5);
   const darkRings = new EventQuads(root, 16, false, atlas, 4);
   const decalA = new FrameQuads(root, 96, true, atlas, 5);
@@ -756,9 +1100,21 @@ export function createEffects(world) {
   const spikes = new Spikes(root, 96);
   const bolts = new Bolts(root, 8);
   const texts = new Texts(root, 24);
-  const pillars = new Pillars(root, 4);
-  const slashes = new Slashes(root, 4);
+  const pillars = new Pillars(root, 10);
+  const slashes = new Slashes(root, 6);
   const meteors = new Meteors(root, 12);
+  // v2.0（第二章＋三位英雄）
+  const sparkle = new Particles(root, 600, true, 9, 2);          // 四角星芒（星塵、妖精、聖光、幽靈）
+  const trailQ = new EventQuads(root, 80, false, atlas, 3);      // 地鼠潛地留下的土痕
+  const beams = new Beams(root, 24);                             // 稜鏡雷射
+  const swirls = new Swirls(root, 3);                            // 旋風斬劍光環
+  const streaks = new Streaks(root, 3);                          // 聖燈衝鋒地面光痕
+  const shards = new Shards(root, 16);                           // 冰隕冰柱
+  const fireDrops = new Meteors(root, 10);                       // 火焰風暴落下的火球
+  fireDrops.slots.forEach((s) => { s.mesh.material = FIRE_DROP_MAT; });
+  const mounds = new Mounds(root, 48);                           // 地鼠土堆
+  // 碎石、尖刺、土堆是受光材質：洞窟黑暗時跟著變暗（第一章不會補丁）
+  if (world.addDarkRoot) for (const o of [debris.mesh, spikes.mesh, mounds.mesh]) world.addDarkRoot(o);
 
   // 全螢幕閃光（冰封、流星、受傷、漏怪）
   const overlayU = { uColor: { value: new THREE.Color() }, uAlpha: { value: 0 }, uVig: { value: 0 } };
@@ -965,6 +1321,547 @@ export function createEffects(world) {
     }
   }
 
+  // ================================================================== v2.0：第二章＋英雄
+  const heroDef = (type) => (HERO_DATA.HEROES && HERO_DATA.HEROES[type]) || null;
+  const heroSkillDef = (id) => (HERO_DATA.HERO_SKILLS && HERO_DATA.HERO_SKILLS[id]) || {};
+  /** 暫時光（格子座標）：讓黑暗中的特效照亮周圍；沒開黑暗時 world 會忽略 */
+  function addLight(x, z, r, life, warm = 0.8, cool = 0, inten = 1) { if (world.addLight) world.addLight(x, z, r, life, warm, cool, inten); }
+  function pushLight(x, z, r, warm = 0.8, cool = 0, inten = 1) { if (world.pushLight) world.pushLight(x, z, r, warm, cool, inten); }
+  const gyOf = (x, z) => Math.max(0, world.groundHeight(x, z));   // 格子座標
+  function heroHeight(h) {
+    if (!h) return 0.55;
+    const d = heroDef(h.type);
+    return (h.flying || (d && d.flying)) ? 0.95 : 0.55;
+  }
+  /** 事件目標位置（世界座標＋身體中段高度） */
+  function targetOf(ev) {
+    const e = ev.targetId != null ? findEnemy(ev.targetId) : null;
+    let x, y, z, s = 0.7;
+    if (ok(ev.x) && ok(ev.z)) { x = ev.x; z = ev.z; y = ok(ev.y) ? ev.y : (e ? e.y || 0 : 0); }
+    else if (e) { x = e.x; z = e.z; y = e.y || 0; }
+    else return null;
+    if (e) s = sizeOf(e.type);
+    if (y < 0.1) y += 0.3 + s * 0.15;
+    return { gx: x, gz: z, x: wx(x), y, z: wz(z) };
+  }
+
+  // ---- 英雄普攻
+  let lastBlast = { t: -9, x: 0, z: 0 };
+  function heroAttackFx(ev) {
+    const h = state && state.hero;
+    if (!h) return;
+    const tp = targetOf(ev);
+    const kind = ev.attack || (heroDef(h.type) && heroDef(h.type).attack) || 'sword';
+    const hx = wx(h.x), hz = wz(h.z);
+    let dx = tp ? tp.x - hx : Math.sin(h.yaw || 0), dz = tp ? tp.z - hz : Math.cos(h.yaw || 0);
+    const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+    if (kind === 'bolt') {
+      // 妖精出手：綠白光點從手上綻開
+      const y = heroHeight(h) + 0.05;
+      const mx = hx + dx * 0.25, mz = hz + dz * 0.25;
+      burst(sparkle, mx, y, mz, 7, 1.5, 0.2, 0.35, 0.22, 0.05, COL.fairyCore, COL.fairy, 1, 0, 3);
+      add.emit(mx, y, mz, 0, 0, 0, 0.16, 0.25, 0.7, COL.fairyCore, COL.fairy, 0.9);
+      addLight(h.x, h.z, 1.4, 0.25, 0.1, 0.6, 0.6);
+      return;
+    }
+    if (kind === 'fireball') {
+      // 法師出手：法杖頂端噴出火光
+      const y = 1.05;
+      const mx = hx + dx * 0.3, mz = hz + dz * 0.3;
+      burst(add, mx, y, mz, 10, 1.3, 0.4, 0.35, 0.18, 0.04, COL.fire, COL.fireEnd, 1, -1, 2);
+      add.emit(mx, y, mz, 0, 0, 0, 0.18, 0.3, 0.9, COL.fireCore, COL.fire, 0.95);
+      burst(sparkle, mx, y, mz, 4, 1.0, 0.3, 0.3, 0.2, 0.04, COL.fireCore, COL.orange, 1, 0, 3);
+      addLight(h.x, h.z, 1.7, 0.3, 1, 0, 0.8);
+      lightFlash(mx, y, mz, COL.orange, 0.9);
+      return;
+    }
+    // 騎士：兩層刀光（金＋白）＋命中火花＋星芒
+    const yaw = Math.atan2(-dz, dx);
+    const tilt = (rand() - 0.5) * 0.9;
+    slashes.emit(hx + dx * 0.2, 0.48, hz + dz * 0.2, yaw, COL.holyEnd, 1.5, 2.2, tilt, 0.3, 1);
+    slashes.emit(hx + dx * 0.24, 0.5, hz + dz * 0.24, yaw, COL.white, 1.2, 1.9, tilt, 0.22, 0.95);
+    if (tp) {
+      burst(add, tp.x, tp.y, tp.z, 12, 3.4, 0.35, 0.3, 0.09, 0.02, COL.spark, COL.sparkEnd, 1, 7, 1.4, tp.y - 0.4, 0.05);
+      add.emit(tp.x, tp.y, tp.z, 0, 0, 0, 0.12, 0.2, 0.75, COL.white, COL.holy, 1);
+      burst(sparkle, tp.x, tp.y, tp.z, 4, 1.8, 0.3, 0.3, 0.26, 0.05, COL.white, COL.holy, 1, 0, 2.5);
+    }
+    addLight(h.x + dx * 0.3, h.z + dz * 0.3, 1.2, 0.22, 0.8, 0, 0.6);
+  }
+
+  // ---- 英雄投射物：拖尾＋消失時的命中特效（不靠事件也能畫，命中事件只補小火花）
+  const projSeen = new Map();   // id → { kind, x, y, z, f, acc }
+  let projFrame = 0;
+  const HERO_PROJ = { fairyBolt: 1, starBolt: 1, fireball: 1 };
+  function projectileFx(dt) {
+    projFrame++;
+    const list = state && state.projectiles;
+    if (list) for (const p of list) {
+      if (!HERO_PROJ[p.kind] || !ok(p.x) || !ok(p.z)) continue;
+      let r = projSeen.get(p.id);
+      if (!r) { r = { kind: p.kind, x: p.x, y: 0.8, z: p.z, f: 0, acc: 0 }; projSeen.set(p.id, r); }
+      r.x = p.x; r.y = ok(p.y) ? p.y : 0.8; r.z = p.z; r.f = projFrame;
+      const x = wx(p.x), y = r.y, z = wz(p.z);
+      if (dt <= 0) continue;
+      if (p.kind === 'fireball') {
+        add.emit(x, y, z, 0, 0, 0, 0.07, 0.62, 0.3, COL.fireCore, COL.fire, 0.85);
+        for (let i = 0; i < 2; i++) add.emit(x + (rand() - 0.5) * 0.12, y + (rand() - 0.5) * 0.12, z + (rand() - 0.5) * 0.12, (rand() - 0.5) * 0.4, 0.4 + rand() * 0.5, (rand() - 0.5) * 0.4, 0.32, 0.26, 0.05, COL.fire, COL.fireEnd, 0.9, -0.5, 1.5);
+        if (rand() < dt * 30) smoke.emit(x, y, z, 0, 0.35, 0, 0.7, 0.14, 0.36, COL.smokeDark, COL.smokeEnd, 0.4, -0.2, 1);
+        pushLight(p.x, p.z, 1.5, 1, 0, 0.9);
+      } else if (p.kind === 'fairyBolt') {
+        add.emit(x, y, z, 0, 0, 0, 0.06, 0.42, 0.22, COL.fairyCore, COL.fairy, 0.9);
+        add.emit(x, y, z, (rand() - 0.5) * 0.3, (rand() - 0.5) * 0.3, (rand() - 0.5) * 0.3, 0.28, 0.16, 0.03, COL.fairy, COL.fairyEnd, 0.8, 0, 2);
+        if (rand() < dt * 30) sparkle.emit(x + (rand() - 0.5) * 0.15, y + (rand() - 0.5) * 0.15, z + (rand() - 0.5) * 0.15, 0, 0.2, 0, 0.4, 0.18, 0.04, rand() < 0.5 ? COL.fairyPink : COL.fairyCore, COL.fairy, 1);
+        pushLight(p.x, p.z, 1.0, 0.1, 0.6, 0.8);
+      } else {
+        add.emit(x, y, z, 0, 0, 0, 0.06, 0.4, 0.2, COL.white, COL.star, 0.9);
+        add.emit(x, y, z, (rand() - 0.5) * 0.3, (rand() - 0.5) * 0.3, (rand() - 0.5) * 0.3, 0.3, 0.14, 0.03, COL.star, COL.starEnd, 0.85, 0, 2);
+        if (rand() < dt * 40) sparkle.emit(x, y, z, (rand() - 0.5) * 0.4, (rand() - 0.5) * 0.4, (rand() - 0.5) * 0.4, 0.45, 0.2, 0.04, COL.white, COL.starEnd, 1, 0, 2);
+        pushLight(p.x, p.z, 1.0, 0.5, 0.3, 0.8);
+      }
+    }
+    for (const [id, r] of projSeen) {
+      if (r.f === projFrame) continue;
+      projSeen.delete(id);
+      projectileImpact(r);
+    }
+  }
+  function projectileImpact(r) {
+    const x = wx(r.x), y = r.y, z = wz(r.z);
+    if (r.kind === 'fireball') { fireballBlast(r.x, r.z, y, 0.9); return; }
+    if (r.kind === 'fairyBolt') {
+      burst(sparkle, x, y, z, 10, 2.0, 0.3, 0.4, 0.24, 0.05, COL.fairyCore, COL.fairy, 1, 0, 2.5);
+      burst(add, x, y, z, 8, 1.6, 0.3, 0.3, 0.12, 0.03, COL.fairyPink, COL.fairyEnd, 1, 0, 2);
+      add.emit(x, y, z, 0, 0, 0, 0.16, 0.2, 0.8, COL.fairyCore, COL.fairy, 0.95);
+      rings.emit(x, Math.max(0.04, y - 0.4), z, 0.1, 0.55, 0.35, COL.fairy, 0.7, 0);
+      addLight(r.x, r.z, 1.1, 0.25, 0.1, 0.6, 0.7);
+      return;
+    }
+    burst(sparkle, x, y, z, 12, 2.4, 0.3, 0.45, 0.26, 0.05, COL.white, COL.starEnd, 1, 0, 2.5);
+    add.emit(x, y, z, 0, 0, 0, 0.18, 0.2, 0.9, COL.white, COL.star, 1);
+    rings.emit(x, Math.max(0.04, y - 0.4), z, 0.1, 0.6, 0.35, COL.star, 0.8, 0);
+    addLight(r.x, r.z, 1.2, 0.3, 0.5, 0.3, 0.8);
+  }
+  /** 法師火球爆炸（格子座標 gx, gz） */
+  function fireballBlast(gx, gz, y, radius) {
+    if (time - lastBlast.t < 0.25 && Math.abs(lastBlast.x - gx) < 0.8 && Math.abs(lastBlast.z - gz) < 0.8) return;
+    lastBlast = { t: time, x: gx, z: gz };
+    const x = wx(gx), z = wz(gz), gy = gyOf(gx, gz), r = radius || 0.9;
+    const cy = Math.max(gy + 0.25, Math.min(y, gy + 0.6));
+    burst(add, x, cy, z, 34, 3.4, 0.45, 0.6, 0.3, 0.06, COL.fire, COL.fireEnd, 1, 1, 2.2, gy, r * 0.3);
+    burst(add, x, cy, z, 10, 1.2, 0.6, 0.7, 0.36, 0.1, COL.fireCore, COL.lava, 0.9, -1.2, 1.5, -99, r * 0.25);
+    add.emit(x, cy, z, 0, 0, 0, 0.28, 0.4, r * 2.4, COL.fireCore, COL.lava, 1);
+    burst(sparkle, x, cy, z, 6, 2.2, 0.4, 0.4, 0.24, 0.05, COL.fireCore, COL.orange, 1, 0, 2);
+    burst(smoke, x, cy, z, 10, 1.0, 0.8, 1.1, 0.28, 0.75, COL.smokeDark, COL.smokeEnd, 0.55, -0.5, 1.6, -99, r * 0.4);
+    rings.emit(x, gy + 0.04, z, 0.15, r * 1.25, 0.4, COL.orange, 1, 0);
+    rings.emit(x, gy + 0.035, z, r * 0.3, r, 0.35, COL.fire, 0.8, 1, 1, 0);
+    darkRings.emit(x, gy + 0.02, z, 0.2, r * 0.9, 1.6, COL.dustEnd, 0.5, 2, 1, 1);
+    for (let i = 0; i < 5; i++) {
+      const th = rand() * TAU, sp = 1 + rand() * 1.8;
+      debris.emit(x, gy + 0.2, z, Math.cos(th) * sp, 2 + rand() * 2, Math.sin(th) * sp, 0.03 + rand() * 0.03, COL.smokeDark, 1, gy);
+    }
+    lightFlash(x, cy + 0.4, z, COL.orange, 2);
+    addLight(gx, gz, r + 1.1, 0.5, 1, 0, 1);
+    if (world.cam) world.cam.shake(0.05, 0.18);
+  }
+
+  // ---- 英雄技能
+  const clouds = [];   // 花粉迷霧（持續）
+  for (let i = 0; i < 4; i++) clouds.push({ ttl: 0, max: 1, x: 0, z: 0, r: 1 });
+  const charge = { active: false, t: 0, travel: 0.3, sx: 0, sz: 0, tx: 0, tz: 0, hit: false };
+
+  function heroSkillFx(ev) {
+    const h = state && state.hero;
+    const id = ev.skill || ev.id;
+    const def = heroSkillDef(id);
+    const R = ok(ev.radius) ? ev.radius : (def.radius || 1.5);
+    const hx = ok(ev.x) ? ev.x : h ? h.x : null, hz = ok(ev.z) ? ev.z : h ? h.z : null;
+    const tx = ok(ev.tx) ? ev.tx : hx, tz = ok(ev.tz) ? ev.tz : hz;
+    if (!ok(hx) || !ok(hz)) return;
+    switch (id) {
+      case 'whirl': whirlFx(h ? h.x : hx, h ? h.z : hz, R); break;
+      case 'charge': chargeFx(h && ok(ev.tx) ? h.x : hx, h && ok(ev.tz) ? h.z : hz, tx, tz, R); break;
+      case 'starburst': starburstFx(h ? h.x : hx, h ? h.z : hz, h); break;
+      case 'pollen': pollenFx(tx, tz, R, def.duration || 4); break;
+      case 'firestorm': firestormFx(tx, tz, R); break;
+      case 'icefall': icefallFx(tx, tz, R); break;
+      default:
+        rings.emit(wx(tx), 0.05, wz(tz), 0.2, R, 0.5, COL.holy, 0.8, 0);
+        addLight(tx, tz, R + 0.5, 0.5, 0.5, 0.3);
+    }
+  }
+
+  function whirlFx(gx, gz, R) {
+    const x = wx(gx), z = wz(gz), gy = gyOf(gx, gz);
+    const follow = () => (state && state.hero ? { x: wx(state.hero.x), z: wz(state.hero.z) } : null);
+    swirls.emit(x, gy + 0.42, z, R * 1.08, COL.holyEnd, 0.6, 2.6, follow, 0.5, 0.12);
+    swirls.emit(x, gy + 0.3, z, R * 0.82, COL.holy, 0.5, 2.2, follow, 0.6, -0.1);
+    rings.emit(x, gy + 0.05, z, 0.3, R * 1.3, 0.5, COL.warm, 0.95, 0);
+    rings.emit(x, gy + 0.06, z, R * 0.55, R * 1.05, 0.65, COL.gold, 0.7, 3, 1, 0, 7);
+    for (let i = 0; i < 28; i++) {
+      const a = (i / 28) * TAU, rr = R * (0.55 + rand() * 0.45), sp = 3 + rand() * 2;
+      add.emit(x + Math.cos(a) * rr, gy + 0.25 + rand() * 0.4, z + Math.sin(a) * rr, -Math.sin(a) * sp, 0.4 + rand() * 0.6, Math.cos(a) * sp, 0.32, 0.12, 0.03, COL.white, COL.holyEnd, 0.9, 0, 3);
+    }
+    burst(sparkle, x, gy + 0.5, z, 14, 2.6, 0.3, 0.5, 0.26, 0.05, COL.white, COL.holy, 1, 0, 2, -99, R * 0.6);
+    ringBurst(smoke, x, gy + 0.08, z, 16, R * 0.4, 2.2, 0.7, 0.25, 0.6, COL.dust, COL.dustEnd, 0.6, 0, 2.6, 0.2);
+    lightFlash(x, gy + 0.8, z, COL.holy, 1.8);
+    addLight(gx, gz, R + 0.9, 0.7, 0.75, 0.05, 1);
+    if (world.cam) world.cam.shake(0.12, 0.3);
+  }
+
+  function chargeFx(sx, sz, tx, tz, R) {
+    const d = Math.hypot(tx - sx, tz - sz);
+    Object.assign(charge, { active: true, t: 0, travel: Math.min(0.6, Math.max(0.18, d / 8)), sx, sz, tx, tz, hit: false, R: R || 1, seenDash: false });
+    const gy = gyOf(sx, sz);
+    streaks.emit(wx(sx), gy + 0.03, wz(sz), wx(tx), wz(tz), 0.8, COL.holyEnd, charge.travel + 0.9, charge.travel);
+    burst(sparkle, wx(sx), gy + 0.4, wz(sz), 10, 2, 0.4, 0.4, 0.24, 0.05, COL.white, COL.holy, 1, 0, 2.5);
+    rings.emit(wx(sx), gy + 0.05, wz(sz), 0.2, 0.9, 0.35, COL.gold, 0.9, 0);
+  }
+  function chargeUpdate(dt) {
+    if (!charge.active) return;
+    charge.t += dt;
+    let k = Math.min(1, charge.t / charge.travel);
+    const h = state && state.hero;
+    let gx = charge.sx + (charge.tx - charge.sx) * k, gz = charge.sz + (charge.tz - charge.sz) * k;
+    // sim 的衝鋒：hero.dashing（或 state 'charge'）期間跟著英雄，衝完才撞擊；最多等 1.5 秒
+    const dashing = !!(h && (h.dashing || h.state === 'charge'));
+    if (dashing) { gx = h.x; gz = h.z; charge.seenDash = true; if (charge.t < 1.5) k = Math.min(k, 0.99); }
+    else if (charge.seenDash) k = 1;
+    const x = wx(gx), z = wz(gz), gy = gyOf(gx, gz);
+    if (!charge.hit && dt > 0) {
+      for (let i = 0; i < 3; i++) add.emit(x + (rand() - 0.5) * 0.3, gy + 0.2 + rand() * 0.5, z + (rand() - 0.5) * 0.3, (rand() - 0.5) * 0.6, 0.5 + rand(), (rand() - 0.5) * 0.6, 0.4, 0.16, 0.03, COL.holy, COL.holyEnd, 1, 0, 2);
+      if (rand() < 0.6) sparkle.emit(x, gy + 0.4 + rand() * 0.3, z, 0, 0.6, 0, 0.5, 0.22, 0.04, COL.white, COL.holy, 1);
+      pushLight(gx, gz, 1.8, 0.8, 0, 1);
+    }
+    if (!charge.hit && k >= 1) {
+      charge.hit = true;
+      const X = wx(charge.tx), Z = wz(charge.tz), g2 = gyOf(charge.tx, charge.tz), R = charge.R || 1;
+      pillars.emit(X, g2, Z, 0.62, 2.8, COL.holy, 0.8);
+      rings.emit(X, g2 + 0.05, Z, 0.3, R * 2.0, 0.55, COL.warm, 1, 0);
+      rings.emit(X, g2 + 0.06, Z, 0.2, R * 1.3, 0.4, COL.gold, 0.9, 0);
+      darkRings.emit(X, g2 + 0.02, Z, 0.3, R * 1.4, 1.0, COL.dustEnd, 0.55, 0);
+      burst(sparkle, X, g2 + 0.5, Z, 22, 3, 0.4, 0.6, 0.3, 0.05, COL.white, COL.holy, 1, 1, 2);
+      burst(add, X, g2 + 0.3, Z, 20, 3.4, 0.4, 0.45, 0.16, 0.03, COL.holy, COL.holyEnd, 1, 4, 1.5, g2);
+      ringBurst(smoke, X, g2 + 0.08, Z, 18, 0.4, 2.6, 0.8, 0.3, 0.75, COL.dust, COL.dustEnd, 0.7, 0, 2.5, 0.3);
+      for (let i = 0; i < 10; i++) {
+        const th = rand() * TAU, sp = 1.5 + rand() * 2.5;
+        debris.emit(X, g2 + 0.2, Z, Math.cos(th) * sp, 2.5 + rand() * 3, Math.sin(th) * sp, 0.04 + rand() * 0.05, COL.dustEnd, 1.3, g2);
+      }
+      screenFlash(COL.holy, 0.16, 0.3, 0.6);
+      lightFlash(X, g2 + 1, Z, COL.holy, 2.5);
+      addLight(charge.tx, charge.tz, R + 1.8, 0.8, 0.85, 0, 1);
+      if (world.cam) world.cam.shake(0.22, 0.4);
+    }
+    if (charge.hit && charge.t > charge.travel + 0.2) charge.active = false;
+  }
+
+  function starburstFx(gx, gz, h) {
+    const x = wx(gx), z = wz(gz), y = heroHeight(h) + 0.1;
+    for (let i = 0; i < 26; i++) {
+      const a = (i / 26) * TAU, sp = 1.8 + rand() * 1.6;
+      sparkle.emit(x, y, z, Math.cos(a) * sp, 0.6 + rand() * 1.4, Math.sin(a) * sp, 0.6 + rand() * 0.3, 0.3, 0.05, i % 3 ? COL.white : COL.fairyPink, COL.starEnd, 1, 0, 2.2);
+    }
+    add.emit(x, y, z, 0, 0, 0, 0.3, 0.4, 1.8, COL.white, COL.star, 1);
+    rings.emit(x, gyOf(gx, gz) + 0.05, z, 0.2, 1.8, 0.5, COL.star, 0.9, 0);
+    rings.emit(x, gyOf(gx, gz) + 0.06, z, 0.4, 1.3, 0.7, COL.fairy, 0.6, 3, 1, 0, -5);
+    lightFlash(x, y + 0.3, z, COL.star, 1.6);
+    addLight(gx, gz, 2.4, 0.5, 0.35, 0.4, 1);
+    if (world.cam) world.cam.shake(0.05, 0.2);
+  }
+
+  function pollenFx(gx, gz, R, dur) {
+    let c = clouds[0];
+    for (const k of clouds) { if (k.ttl <= 0) { c = k; break; } if (k.ttl < c.ttl) c = k; }
+    Object.assign(c, { ttl: dur, max: dur, x: gx, z: gz, r: R });
+    const x = wx(gx), z = wz(gz), gy = gyOf(gx, gz);
+    for (let i = 0; i < 26; i++) {
+      const a = rand() * TAU, d = Math.sqrt(rand()) * R * 0.6, sp = 0.8 + rand() * 1.4;
+      smoke.emit(x + Math.cos(a) * d, gy + 0.25 + rand() * 0.3, z + Math.sin(a) * d, Math.cos(a) * sp, 0.3 + rand() * 0.3, Math.sin(a) * sp, 1.2 + rand() * 0.6, 0.35, 1.0, COL.pink, COL.pinkEnd, 0.55, -0.1, 1.8);
+    }
+    burst(sparkle, x, gy + 0.5, z, 20, 1.8, 0.5, 0.9, 0.22, 0.04, COL.pollen, COL.pink, 1, -0.2, 1.2, -99, R * 0.6);
+    for (let i = 0; i < 14; i++) {
+      const a = rand() * TAU, d = Math.sqrt(rand()) * R * 0.7;
+      add.emit(x + Math.cos(a) * d, gy + 0.3 + rand() * 0.3, z + Math.sin(a) * d, Math.cos(a) * 0.8, 0.2, Math.sin(a) * 0.8, 1.1 + rand() * 0.4, 0.5, 1.2, COL.pink, COL.pinkEnd, 0.3, 0, 1.5);
+    }
+    rings.emit(x, gy + 0.05, z, 0.3, R * 1.15, 0.6, COL.pink, 0.9, 0);
+    addLight(gx, gz, R + 0.8, 0.5, 0.2, 0.6, 0.9);
+  }
+  function cloudsUpdate(dt) {
+    for (const c of clouds) {
+      if (c.ttl <= 0) continue;
+      c.ttl -= dt;
+      const k = Math.min(1, c.ttl / 0.6, (c.max - c.ttl) / 0.3 + 0.3);
+      const x = wx(c.x), z = wz(c.z), gy = gyOf(c.x, c.z);
+      decalA.add(x, gy + 0.03, z, c.r * 1.08, 0, COL.pinkEnd, 0.32 * k, 1);
+      decalA.add(x, gy + 0.035, z, c.r, time * 0.4, COL.pink, 0.45 * k, 3);
+      if (dt > 0 && rand() < dt * 14 * c.r) {
+        const a = rand() * TAU, d = Math.sqrt(rand()) * c.r * 0.85;
+        smoke.emit(x + Math.cos(a) * d, gy + 0.15 + rand() * 0.35, z + Math.sin(a) * d, (rand() - 0.5) * 0.2, 0.1 + rand() * 0.15, (rand() - 0.5) * 0.2, 1.6, 0.45, 1.0, COL.pink, COL.pinkEnd, 0.4 * k, 0, 0.5);
+      }
+      if (dt > 0 && rand() < dt * 7 * c.r) {
+        const a = rand() * TAU, d = Math.sqrt(rand()) * c.r * 0.8;
+        add.emit(x + Math.cos(a) * d, gy + 0.2 + rand() * 0.4, z + Math.sin(a) * d, (rand() - 0.5) * 0.15, 0.06, (rand() - 0.5) * 0.15, 1.6, 0.6, 1.1, COL.pink, COL.pinkEnd, 0.2 * k, 0, 0.3);
+      }
+      if (dt > 0 && rand() < dt * 12 * c.r) {
+        const a = rand() * TAU, d = Math.sqrt(rand()) * c.r;
+        sparkle.emit(x + Math.cos(a) * d, gy + 0.1 + rand() * 0.6, z + Math.sin(a) * d, (rand() - 0.5) * 0.2, 0.25 + rand() * 0.3, (rand() - 0.5) * 0.2, 1.2, 0.14, 0.04, rand() < 0.5 ? COL.pollen : COL.white, COL.pink, 1);
+      }
+      pushLight(c.x, c.z, c.r + 0.3, 0.3, 0.5, 0.75 * k);
+    }
+  }
+
+  function firestormFx(gx, gz, R) {
+    const x = wx(gx), z = wz(gz), gy = gyOf(gx, gz);
+    rings.emit(x, gy + 0.05, z, R * 0.9, R * 1.12, 1.0, COL.orange, 1, 3, 1, 1, 3);
+    rings.emit(x, gy + 0.04, z, 0.2, R * 1.5, 0.55, COL.fire, 1, 0);
+    // 火圈：一圈往上竄的火焰
+    for (let i = 0; i < 40; i++) {
+      const a = (i / 40) * TAU + rand() * 0.1;
+      add.emit(x + Math.cos(a) * R, gy + 0.08, z + Math.sin(a) * R, Math.cos(a) * 0.3, 1.6 + rand() * 1.6, Math.sin(a) * 0.3, 0.7 + rand() * 0.3, 0.34, 0.06, COL.fire, COL.fireEnd, 1, -0.5, 1.6);
+    }
+    // 火柱：中間與周圍輪流噴發
+    const n = 5;
+    for (let i = 0; i < n; i++) {
+      after(0.08 + i * 0.09, () => {
+        const a = rand() * TAU, d = i === 0 ? 0 : R * (0.35 + rand() * 0.45);
+        const px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d;
+        pillars.emit(px, gy, pz, i === 0 ? 0.42 : 0.28, i === 0 ? 3.2 : 2.2, COL.fire, 0.75);
+        burst(add, px, gy + 0.2, pz, 14, 2.4, 0.8, 0.5, 0.26, 0.05, COL.fireCore, COL.fireEnd, 1, -1, 1.8, -99, 0.15);
+        burst(smoke, px, gy + 0.6, pz, 4, 0.7, 0.9, 1.1, 0.3, 0.8, COL.smokeDark, COL.smokeEnd, 0.5, -0.4, 1.4);
+        rings.emit(px, gy + 0.05, pz, 0.1, 0.8, 0.35, COL.orange, 0.9, 0);
+        lightFlash(px, gy + 1, pz, COL.orange, 2.2);
+      });
+    }
+    // 天上落下的小火球
+    for (let i = 0; i < 6; i++) {
+      const a = rand() * TAU, d = R * (0.2 + rand() * 0.75);
+      const ex = x + Math.cos(a) * d, ez = z + Math.sin(a) * d;
+      fireDrops.emit(ex - 1.6, gy + 5 + rand(), ez - 1.2, ex, gy, ez, 0.35 + rand() * 0.15, 0.05 + i * 0.07, 0.1 + rand() * 0.06);
+    }
+    screenFlash(COL.orange, 0.14, 0.35, 0.6);
+    addLight(gx, gz, R + 1.4, 1.4, 1, 0, 1);
+    if (world.cam) world.cam.shake(0.22, 0.5);
+  }
+
+  function icefallFx(gx, gz, R) {
+    const x = wx(gx), z = wz(gz), gy = gyOf(gx, gz);
+    rings.emit(x, gy + 0.05, z, R, R * 0.95, 0.5, COL.frost, 0.7, 3, 1, 2, -2);
+    const land = (main) => (sx, sy, sz, size) => {
+      burst(hard, sx, sy + 0.15, sz, main ? 26 : 10, main ? 3 : 2.2, 0.6, 0.6, 0.07, 0.04, COL.white, COL.ice, 1, 8, 0.6, sy + 0.03, size);
+      burst(add, sx, sy + 0.2, sz, main ? 16 : 8, 2.2, 0.4, 0.4, 0.16, 0.03, COL.frost, COL.frostEnd, 1, 2, 2);
+      rings.emit(sx, sy + 0.05, sz, 0.1, main ? R * 1.6 : 0.8, main ? 0.6 : 0.35, COL.frost, 1, 0);
+      for (let i = 0; i < (main ? 7 : 3); i++) {
+        const a = rand() * TAU, d = rand() * (main ? R * 0.7 : 0.3);
+        spikes.emit(sx + Math.cos(a) * d, sy, sz + Math.sin(a) * d, (main ? 0.35 : 0.22) + rand() * 0.25, 0.06 + rand() * 0.04, COL.ice, 1.4 + rand() * 0.6, rand() * 0.06, 0.5);
+      }
+      for (let i = 0; i < (main ? 10 : 4); i++) {
+        const th = rand() * TAU, sp = 1 + rand() * 2;
+        debris.emit(sx, sy + 0.2, sz, Math.cos(th) * sp, 2 + rand() * 2.5, Math.sin(th) * sp, 0.03 + rand() * 0.04, COL.ice, 1.1, sy);
+      }
+      if (main) {
+        ringBurst(smoke, sx, sy + 0.1, sz, 18, R * 0.4, 2.2, 1.0, 0.3, 0.8, COL.white, COL.ice, 0.5, 0, 2.2, 0.2);
+        screenFlash(COL.frost, 0.22, 0.4, 0.6);
+        lightFlash(sx, sy + 1, sz, COL.blue, 2.5);
+        addLight(sx + world.W / 2, sz + world.H / 2, R + 1.2, 0.9, 0, 1, 1);
+        if (world.cam) world.cam.shake(0.25, 0.45);
+      } else if (world.cam) world.cam.shake(0.06, 0.15);
+    };
+    shards.emit(x, gy + 7, gy, z, 0.42, 0.12, 0.55, land(true));
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * TAU + rand() * 0.5, d = R * (0.45 + rand() * 0.4);
+      shards.emit(x + Math.cos(a) * d, gy + 6 + rand(), gy, z + Math.sin(a) * d, 0.32 + rand() * 0.1, rand() * 0.35, 0.22 + rand() * 0.12, land(false));
+    }
+    addLight(gx, gz, R + 0.6, 0.6, 0, 0.9, 0.6);
+  }
+
+  // ---- 第二章事件
+  function lanternOnFx(gx, gz) {
+    const x = wx(gx), z = wz(gz), gy = gyOf(gx, gz), y = gy + 0.85;
+    add.emit(x, y, z, 0, 0, 0, 0.35, 0.3, 1.5, COL.fireCore, COL.lantern, 1);
+    rings.emit(x, gy + 0.05, z, 0.2, 2.6, 0.75, COL.lantern, 0.85, 0);
+    rings.emit(x, gy + 0.06, z, 0.3, 1.2, 0.6, COL.gold, 0.7, 3, 1, 0, 2);
+    burst(sparkle, x, y, z, 12, 1.4, 0.6, 0.7, 0.22, 0.04, COL.fireCore, COL.lantern, 1, -0.3, 1.5);
+    for (let i = 0; i < 10; i++) add.emit(x + (rand() - 0.5) * 0.3, y, z + (rand() - 0.5) * 0.3, (rand() - 0.5) * 0.4, 0.6 + rand() * 0.8, (rand() - 0.5) * 0.4, 0.9, 0.08, 0.02, COL.lantern, COL.lanternEnd, 1, -0.2, 0.8);
+    lightFlash(x, y, z, COL.lantern, 1.6);
+    addLight(gx, gz, 3, 0.5, 1, 0, 0.7);
+  }
+  function lanternOutFx(gx, gz) {
+    const x = wx(gx), z = wz(gz), gy = gyOf(gx, gz), y = gy + 0.85;
+    burst(smoke, x, y, z, 10, 0.6, 0.85, 1.2, 0.18, 0.55, COL.smokeDark, COL.darkEnd, 0.75, -0.6, 1.6, -99, 0.15);
+    for (let i = 0; i < 8; i++) add.emit(x + (rand() - 0.5) * 0.2, y, z + (rand() - 0.5) * 0.2, (rand() - 0.5) * 1.2, 0.5 + rand(), (rand() - 0.5) * 1.2, 0.6, 0.07, 0.02, COL.lantern, COL.redEnd, 1, 5, 0.5, gy + 0.03);
+    darkRings.emit(x, gy + 0.025, z, 0.3, 1.8, 0.8, COL.darkEnd, 0.6, 1, 1, 0);
+    rings.emit(x, gy + 0.05, z, 1.4, 0.2, 0.45, COL.purple, 0.6, 0, 1);
+  }
+  function inkFx(gx, gz, y0) {
+    const x = wx(gx), z = wz(gz), gy = gyOf(gx, gz), y = ok(y0) && y0 > 0.3 ? y0 : 1.3;
+    for (let i = 0; i < 22; i++) {
+      const th = rand() * TAU, sp = 0.4 + rand() * 1.3;
+      hard.emit(x, y, z, Math.cos(th) * sp, -0.3 - rand() * 1.2, Math.sin(th) * sp, 0.8 + rand() * 0.3, 0.08 + rand() * 0.06, 0.05, COL.ink, COL.inkEnd, 1, 6, 0.3, gy + 0.02);
+    }
+    burst(smoke, x, y, z, 8, 0.7, 0.2, 0.9, 0.2, 0.55, COL.ink, COL.inkEnd, 0.8, 0.4, 1.8);
+    for (let i = 0; i < 10; i++) {
+      const th = rand() * TAU, sp = 0.4 + rand() * 1.2;
+      add.emit(x, y, z, Math.cos(th) * sp, -0.3 - rand(), Math.sin(th) * sp, 0.7, 0.09, 0.03, COL.purple, COL.purpleEnd, 0.8, 6, 0.3, gy + 0.02);
+    }
+    after(0.35, () => {
+      darkRings.emit(x, gy + 0.02, z, 0.3, 1.25, 3.2, COL.inkSplat, 0.95, 2, 1, 1);
+      darkRings.emit(x, gy + 0.025, z, 0.1, 0.7, 2.8, COL.inkEnd, 0.85, 1, 1, 1);
+      rings.emit(x, gy + 0.03, z, 0.3, 1.3, 0.8, COL.purple, 0.5, 0);
+    });
+    burst(add, x, y, z, 6, 1, 0.2, 0.4, 0.12, 0.03, COL.purple, COL.purpleEnd, 0.8, 0, 2);
+  }
+  function burrowFx(gx, gz, big) {
+    const x = wx(gx), z = wz(gz), gy = gyOf(gx, gz), k = big ? 1.8 : 1;
+    ringBurst(smoke, x, gy + 0.08, z, big ? 18 : 10, 0.25 * k, 1.4 * k, 0.8, 0.22 * k, 0.6 * k, COL.dirt, COL.dirtEnd, 0.75, 0, 2.6, 0.3);
+    burst(hard, x, gy + 0.15, z, big ? 24 : 12, 2.4 * k, 0.75, 0.7, 0.06 * k, 0.04, COL.dirt, COL.dirtEnd, 1, 8, 0.5, gy + 0.03, 0.2 * k);
+    for (let i = 0; i < (big ? 14 : 6); i++) {
+      const th = rand() * TAU, sp = 0.8 + rand() * 1.4 * k;
+      debris.emit(x, gy + 0.15, z, Math.cos(th) * sp, 2 + rand() * 2 * k, Math.sin(th) * sp, (0.035 + rand() * 0.04) * k, rand() < 0.5 ? COL.dirtEnd : COL.dirt, 1.1, gy);
+    }
+    darkRings.emit(x, gy + 0.02, z, 0.2 * k, 0.7 * k, 2.2, COL.dirtDark, 0.85, 2, 1, 1);
+    mounds.emit(x, gy, z, 0.34 * k, 0.17 * k, 2.4, COL.dirt);
+    if (big && world.cam) world.cam.shake(0.18, 0.4);
+  }
+  function emergeFx(gx, gz, big) {
+    const x = wx(gx), z = wz(gz), gy = gyOf(gx, gz), k = big ? 2.4 : 1.2;
+    burst(hard, x, gy + 0.2, z, big ? 40 : 16, 3.2 * k * 0.8, 0.85, 0.9, 0.07 * k * 0.8, 0.04, COL.dirt, COL.dirtEnd, 1, 8, 0.4, gy + 0.03, 0.3 * k);
+    ringBurst(smoke, x, gy + 0.08, z, big ? 26 : 12, 0.3 * k, 1.8 * k, 1.0, 0.3 * k, 0.8 * k, COL.dirt, COL.dirtEnd, 0.8, 0, 2.2, 0.5);
+    burst(smoke, x, gy + 0.3, z, big ? 12 : 5, 0.8, 0.9, 1.1, 0.3 * k, 0.8 * k, COL.dirtEnd, COL.smokeEnd, 0.6, -0.3, 1.5, -99, 0.3 * k);
+    for (let i = 0; i < (big ? 30 : 10); i++) {
+      const th = rand() * TAU, sp = 1 + rand() * 2 * k;
+      debris.emit(x + Math.cos(th) * 0.2 * k, gy + 0.2, z + Math.sin(th) * 0.2 * k, Math.cos(th) * sp, 3 + rand() * 3 * k, Math.sin(th) * sp, (0.04 + rand() * 0.05) * (big ? 1.6 : 1), rand() < 0.5 ? COL.dirtEnd : COL.smokeDark, 1.4, gy);
+    }
+    darkRings.emit(x, gy + 0.02, z, 0.3 * k, 0.9 * k, 3.0, COL.dirtDark, 0.9, 2, 1, 1);
+    rings.emit(x, gy + 0.04, z, 0.2, 1.3 * k, 0.5, COL.dust, 0.6, 0);
+    // 冒出後留下一圈土堆
+    for (let i = 0; i < (big ? 7 : 4); i++) {
+      const a = (i / (big ? 7 : 4)) * TAU + rand() * 0.5, d = 0.32 * k;
+      mounds.emit(x + Math.cos(a) * d, gy, z + Math.sin(a) * d, (0.13 + rand() * 0.06) * k, (0.08 + rand() * 0.05) * k, 3 + rand(), rand() < 0.5 ? COL.dirt : COL.dirtEnd);
+    }
+    if (big) {
+      darkRings.emit(x, gy + 0.03, z, 0.5, 3.2, 0.9, COL.dustEnd, 0.7, 0);
+      screenFlash(COL.wormEnd, 0.25, 0.6, 0.85);
+      if (world.cam) world.cam.shake(0.4, 0.8);
+    } else if (world.cam) world.cam.shake(0.05, 0.18);
+  }
+  function revealFx(gx, gz) {
+    const x = wx(gx), z = wz(gz), gy = gyOf(gx, gz);
+    rings.emit(x, gy + 0.05, z, 0.1, 1.1, 0.55, COL.ghost, 0.9, 0);
+    rings.emit(x, gy + 0.06, z, 0.8, 0.2, 0.5, COL.ghostEnd, 0.7, 0, 1);
+    burst(sparkle, x, gy + 0.5, z, 12, 1.4, 0.4, 0.6, 0.22, 0.04, COL.white, COL.ghost, 1, -0.3, 2);
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * TAU;
+      add.emit(x + Math.cos(a) * 0.35, gy + 0.2, z + Math.sin(a) * 0.35, -Math.sin(a) * 0.8, 0.9 + rand() * 0.6, Math.cos(a) * 0.8, 0.7, 0.16, 0.03, COL.ghost, COL.ghostEnd, 0.9, -0.3, 1.5);
+    }
+    add.emit(x, gy + 0.45, z, 0, 0, 0, 0.25, 0.3, 1.1, COL.white, COL.ghost, 0.8);
+  }
+  function segmentFx(gx, gz) {
+    const x = wx(gx), z = wz(gz), gy = gyOf(gx, gz), y = gy + 0.6;
+    burst(hard, x, y, z, 22, 2.8, 0.6, 0.7, 0.09, 0.05, COL.worm, COL.wormEnd, 1, 8, 0.6, gy + 0.03, 0.3);
+    burst(hard, x, y, z, 10, 2.2, 0.6, 0.6, 0.07, 0.04, COL.wormGoo, COL.gooEnd, 1, 8, 0.6, gy + 0.03, 0.2);
+    burst(add, x, y, z, 14, 2, 0.4, 0.45, 0.2, 0.04, COL.purple, COL.purpleEnd, 1, 1, 2);
+    burst(smoke, x, y, z, 8, 0.9, 0.6, 1.0, 0.3, 0.8, COL.wormEnd, COL.darkEnd, 0.7, -0.3, 1.5, -99, 0.3);
+    rings.emit(x, gy + 0.05, z, 0.2, 1.6, 0.5, COL.worm, 0.9, 0);
+    darkRings.emit(x, gy + 0.02, z, 0.2, 1.0, 2.5, COL.wormEnd, 0.8, 2, 1, 1);
+    for (let i = 0; i < 8; i++) {
+      const th = rand() * TAU, sp = 1 + rand() * 2.4;
+      debris.emit(x, y, z, Math.cos(th) * sp, 2 + rand() * 3, Math.sin(th) * sp, 0.05 + rand() * 0.06, rand() < 0.5 ? COL.worm : COL.wormEnd, 1.4, gy);
+    }
+    lightFlash(x, y + 0.4, z, COL.purple, 1.6);
+    if (world.cam) world.cam.shake(0.16, 0.35);
+  }
+  function eatFx(gx, gz) {
+    const x = wx(gx), z = wz(gz), gy = gyOf(gx, gz);
+    // 光被吸進去：從外圈往中心收的暖光粒子＋往內縮的黑環
+    for (let i = 0; i < 30; i++) {
+      const a = rand() * TAU, d = 1.0 + rand() * 0.8, y = gy + 0.2 + rand() * 1.0;
+      add.emit(x + Math.cos(a) * d, y, z + Math.sin(a) * d, -Math.cos(a) * d * 3.2, (gy + 0.6 - y) * 3, -Math.sin(a) * d * 3.2, 0.3, 0.16, 0.04, COL.lantern, COL.lanternEnd, 1, 0, 0);
+    }
+    darkRings.emit(x, gy + 0.03, z, 2.0, 0.2, 0.55, COL.darkEnd, 0.9, 1, 1, 0);
+    rings.emit(x, gy + 0.05, z, 1.8, 0.1, 0.5, COL.worm, 0.8, 0, 1);
+    after(0.3, () => {
+      burst(smoke, x, gy + 0.6, z, 14, 1.2, 0.7, 1.3, 0.35, 1.0, COL.wormEnd, COL.darkEnd, 0.8, -0.3, 1.4, -99, 0.4);
+      burst(hard, x, gy + 0.4, z, 14, 2.4, 0.7, 0.7, 0.07, 0.04, COL.dirt, COL.dirtEnd, 1, 8, 0.5, gy + 0.03, 0.3);
+      for (let i = 0; i < 8; i++) {
+        const th = rand() * TAU, sp = 1 + rand() * 2;
+        debris.emit(x, gy + 0.3, z, Math.cos(th) * sp, 2 + rand() * 2.5, Math.sin(th) * sp, 0.04 + rand() * 0.04, COL.smoke, 1.2, gy);
+      }
+      screenFlash(COL.wormEnd, 0.2, 0.5, 0.85);
+      if (world.cam) world.cam.shake(0.25, 0.45);
+    });
+  }
+
+  // ---- 每幀：雷射、潛地土痕、光源光暈
+  const laserCols = [COL.prismA, COL.prismB, COL.prismC];
+  const burrowTrack = new Map();   // 敵人 id → { x, z }（上一次留下土痕的位置）
+  function laserHeight(t) { return t.branch ? 1.8 : 1.2 + 0.15 * Math.min(3, t.level || 1); }
+  function chapter2Update(dt) {
+    beams.begin();
+    mounds.begin();
+    if (!state) { beams.end(dt); mounds.update(dt); return; }
+    const cam = world.camera;
+    if (state.towers) for (const t of state.towers) {
+      const L = t.lasers;
+      if (!L || !L.length) continue;
+      const ax = wx(t.x), az = wz(t.z), ay = laserHeight(t);
+      const style = t.branch === 'a' ? 1 : t.branch === 'b' ? 2 : 0;
+      let maxP = 0;
+      for (let i = 0; i < L.length; i++) {
+        const b = L[i];
+        if (!ok(b.x) || !ok(b.z)) continue;
+        const p = Math.max(0, Math.min(1, ok(b.power) ? b.power : 1));
+        maxP = Math.max(maxP, p);
+        let by = ok(b.y) ? b.y : 0;
+        if (by < 0.1) by += 0.38;
+        const bx = wx(b.x), bz = wz(b.z);
+        const col = style === 1 ? laserCols[i % 3] : style === 2 ? COL.focus : COL.prism;
+        const w = (0.2 + 0.28 * p) * (style === 2 ? 1.7 : style === 1 ? 0.8 : 1);   // 帶狀寬度（含外圍光暈）
+        beams.add(ax, ay, az, bx, by, bz, w, col, p, style, (t.id * 0.37 + i * 0.21) % 1, cam, style === 2 ? 0.9 + p : 0);
+        if (dt > 0) {
+          add.emit(bx, by, bz, 0, 0, 0, 0.07, 0.2 + 0.35 * p, 0.12, COL.white, col, 0.8);
+          if (rand() < dt * (6 + 22 * p)) add.emit(bx, by, bz, (rand() - 0.5) * 2.4, rand() * 1.8, (rand() - 0.5) * 2.4, 0.3, 0.08, 0.02, COL.white, col, 1, 6, 1);
+          if (rand() < dt * 8 * p) sparkle.emit(bx + (rand() - 0.5) * 0.2, by + (rand() - 0.5) * 0.2, bz + (rand() - 0.5) * 0.2, 0, 0.4, 0, 0.3, 0.2, 0.04, COL.white, col, 1);
+        }
+      }
+      if (dt > 0 && maxP > 0) add.emit(ax, ay, az, 0, 0, 0, 0.07, 0.3 + 0.35 * maxP, 0.15, COL.white, COL.prism, 0.8);
+    }
+    beams.end(dt);
+    // 潛地中的敵人：地面隆起＋一路留下土痕＋偶爾翻出土塊
+    if (state.enemies) {
+      for (const e of state.enemies) {
+        if (!e.burrowed) { if (burrowTrack.size) burrowTrack.delete(e.id); continue; }
+        const big = BIG_BURROWERS.has(e.type);
+        const x = wx(e.x), z = wz(e.z), gy = gyOf(e.x, e.z), k = big ? 2 : 1;
+        decalN.add(x, gy + 0.018, z, 0.36 * k, 0, COL.dirtDark, 0.85, 1);
+        mounds.add(x, gy, z, 0.24 * k, (0.1 + 0.025 * Math.sin(time * 14 + e.id)) * k, e.id + time * 0.5, COL.dirt);
+        let tr = burrowTrack.get(e.id);
+        if (!tr) { tr = { x: e.x, z: e.z }; burrowTrack.set(e.id, tr); }
+        if (Math.hypot(e.x - tr.x, e.z - tr.z) > 0.22) {
+          trailQ.emit(x, gy + 0.012, z, 0.2 * k, 0.26 * k, 2.6, COL.dirtDark, 0.7, 1, 0, 1);
+          tr.x = e.x; tr.z = e.z;
+        }
+        if (dt > 0 && rand() < dt * 10 * k) hard.emit(x + (rand() - 0.5) * 0.2 * k, gy + 0.06, z + (rand() - 0.5) * 0.2 * k, (rand() - 0.5) * 1.2, 1 + rand() * 1.2, (rand() - 0.5) * 1.2, 0.45, 0.05 * k, 0.03, COL.dirt, COL.dirtEnd, 1, 8, 0.3, gy + 0.02);
+        if (dt > 0 && rand() < dt * 3 * k) smoke.emit(x, gy + 0.1, z, 0, 0.25, 0, 0.8, 0.15 * k, 0.4 * k, COL.dirt, COL.dirtEnd, 0.5, 0, 1);
+      }
+      if (burrowTrack.size > 64) burrowTrack.clear();
+    }
+    mounds.update(dt);
+    // 黑暗中的光源光暈：燈籠暖光圈、被照亮的水晶
+    if (state.lights && world.isDark && world.isDark()) {
+      for (const L of state.lights) {
+        if (L.on === false || !ok(L.x) || !ok(L.z)) continue;
+        if (L.kind === 'lantern') {
+          const x = wx(L.x), z = wz(L.z), gy = gyOf(L.x, L.z);
+          decalA.add(x, gy + 0.02, z, Math.min(1.6, (L.r || 2) * 0.55), 0, COL.lanternEnd, 0.2 + 0.04 * Math.sin(time * 7 + L.x), 1);
+        } else if (L.kind === 'crystal') {
+          const x = wx(L.x), z = wz(L.z), gy = gyOf(L.x, L.z);
+          decalA.add(x, gy + 0.02, z, 1.1, time * 0.5, COL.crystalGlow, 0.28 + 0.08 * Math.sin(time * 3 + L.z), 1);
+          if (dt > 0) add.emit(x, gy + 0.5, z, 0, 0, 0, 0.06, 0.9 + 0.1 * Math.sin(time * 4 + L.x), 0.12, COL.crystalGlow, COL.crystalGlow, 0.35);
+          if (dt > 0 && rand() < dt * 2.5) sparkle.emit(x + (rand() - 0.5) * 0.4, gy + 0.3 + rand() * 0.5, z + (rand() - 0.5) * 0.4, 0, 0.25, 0, 0.8, 0.2, 0.04, COL.white, COL.crystalGlow, 1);
+        }
+      }
+    }
+  }
+
   // ------------------------------------------------------------------ 事件
   function handle(ev) {
     if (!ev || !ev.type || !world.level) return;
@@ -976,6 +1873,7 @@ export function createEffects(world) {
         const x = wx(px), z = wz(pz), y = (ev.flying || (e && e.flying) ? 1.3 : 0) + 0.4;
         burst(add, x, y, z, 10, 1.2, 0.5, 0.6, 0.16, 0.04, COL.purple, COL.purpleEnd, 0.9, -0.4, 2);
         rings.emit(x, 0.04, z, 0.1, 0.65, 0.45, COL.purple, 0.8, 0);
+        if (BIG_BURROWERS.has(ev.enemy || (e && e.type))) emergeFx(px, pz, true);   // v2.0：巨蟲／地鼠王竄出
         break;
       }
       case 'death': {
@@ -1031,12 +1929,20 @@ export function createEffects(world) {
         let y = ok(ev.y) ? ev.y : 0;
         if (y < 0.1) y += 0.35;                           // 沒給高度時補到身體中段
         if (ev.kind === 'meteor') { burst(add, wx(ev.x), y, wz(ev.z), 5, 1.8, 0.5, 0.35, 0.12, 0.03, COL.fire, COL.fireEnd, 1, 2, 2); return; }
+        // v2.0：英雄投射物的命中大特效由「投射物消失」畫，這裡只補一點火花
+        if (ev.kind === 'fairyBolt' || ev.kind === 'starBolt') { burst(sparkle, wx(ev.x), y, wz(ev.z), 3, 1.2, 0.3, 0.3, 0.18, 0.04, COL.white, ev.kind === 'starBolt' ? COL.star : COL.fairy, 1); return; }
+        if (ev.kind === 'fireball') { burst(add, wx(ev.x), y, wz(ev.z), 5, 1.8, 0.4, 0.3, 0.12, 0.03, COL.fire, COL.fireEnd, 1, 2, 2); return; }
+        if (ev.kind === 'laser') { if (rand() < 0.3) burst(add, wx(ev.x), y, wz(ev.z), 2, 1.2, 0.3, 0.2, 0.08, 0.02, COL.white, COL.prism, 1); return; }
+        if (ev.kind === 'whirl' || ev.kind === 'charge' || ev.kind === 'sword') { burst(add, wx(ev.x), y, wz(ev.z), 6, 2.6, 0.35, 0.28, 0.09, 0.02, COL.spark, COL.sparkEnd, 1, 7, 1.4); return; }
         hitFx(wx(ev.x), y, wz(ev.z), ev.kind, ev.dmgType);
         break;
       }
       case 'explode':
         if (!ok(ev.x) || !ok(ev.z)) return;
+        if (ev.kind === 'fireball') { fireballBlast(ev.x, ev.z, ok(ev.y) ? ev.y : 0.5, ev.radius || 0.9); return; }   // v2.0 法師火球
+        if (ev.kind === 'firestorm' || ev.kind === 'icefall' || ev.kind === 'whirl' || ev.kind === 'charge') return;   // 技能大特效由 heroSkill 畫
         explodeFx(wx(ev.x), wz(ev.z), ev.radius, ev.kind);
+        if (ev.kind === 'fire' || ev.kind === 'boulder') addLight(ev.x, ev.z, (ev.radius || 1) + 1, 0.5, 1, 0, 0.8);
         break;
       case 'beam': {
         const pts = ev.points;
@@ -1175,15 +2081,44 @@ export function createEffects(world) {
         burst(add, wx(lp.x), 1.3, wz(lp.z), 14, 1.2, 0.3, 0.8, 0.12, 0.03, COL.holy, COL.goldEnd, 1, -0.2, 1.5);
         break;
       }
-      case 'heroAttack': {
-        const h = state && state.hero;
-        const e = findEnemy(ev.targetId);
-        if (!h || !e) return;
-        const hx = wx(h.x), hz = wz(h.z), ex = wx(e.x), ez = wz(e.z);
-        let dx = ex - hx, dz = ez - hz;
-        const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
-        slashes.emit(hx + dx * 0.2, 0.45, hz + dz * 0.2, Math.atan2(-dz, dx));
-        burst(add, ex, (e.y || 0) + 0.35, ez, 5, 2.2, 0.3, 0.25, 0.08, 0.02, COL.warm, COL.spark, 1, 6, 1.5);
+      case 'heroAttack': heroAttackFx(ev); break;      // v2.0：sword／bolt／fireball 各有特效
+      case 'heroSkill': heroSkillFx(ev); break;
+      // ---- v2.0 第二章
+      case 'lanternOn': { const t = towerXZ(ev); if (t) lanternOnFx(t.x, t.z); break; }
+      case 'lanternOut': { const t = towerXZ(ev); if (t) lanternOutFx(t.x, t.z); break; }
+      case 'ink': {
+        const e = findEnemy(ev.id);
+        const px = ok(ev.x) ? ev.x : e && e.x, pz = ok(ev.z) ? ev.z : e && e.z;
+        if (ok(px) && ok(pz)) inkFx(px, pz, ok(ev.y) ? ev.y : e ? e.y : 1.3);
+        break;
+      }
+      case 'burrow': case 'emerge': {
+        const e = findEnemy(ev.id);
+        const px = ok(ev.x) ? ev.x : e && e.x, pz = ok(ev.z) ? ev.z : e && e.z;
+        if (!ok(px) || !ok(pz)) return;
+        const big = BIG_BURROWERS.has(ev.enemy || (e && e.type));
+        if (ev.type === 'burrow') burrowFx(px, pz, big); else emergeFx(px, pz, big);
+        break;
+      }
+      case 'reveal': {
+        const e = findEnemy(ev.id);
+        const px = ok(ev.x) ? ev.x : e && e.x, pz = ok(ev.z) ? ev.z : e && e.z;
+        if (ok(px) && ok(pz)) revealFx(px, pz);
+        break;
+      }
+      case 'segment': {
+        const e = findEnemy(ev.id);
+        const px = ok(ev.x) ? ev.x : e && e.x, pz = ok(ev.z) ? ev.z : e && e.z;
+        if (ok(px) && ok(pz)) segmentFx(px, pz);
+        break;
+      }
+      case 'eat': { const t = towerXZ(ev); if (t) eatFx(t.x, t.z); break; }
+      case 'laserOn': {
+        const t = findTower(ev.towerId);
+        if (!t || !ok(t.x)) return;
+        const y = t.type ? laserHeight(t) : 1.4;
+        burst(sparkle, wx(t.x), y, wz(t.z), 8, 1.4, 0.3, 0.35, 0.24, 0.05, COL.white, COL.prism, 1, 0, 2.5);
+        add.emit(wx(t.x), y, wz(t.z), 0, 0, 0, 0.2, 0.2, 0.8, COL.white, COL.prism, 0.9);
         break;
       }
       case 'heroHurt': {
@@ -1276,36 +2211,25 @@ export function createEffects(world) {
       if (timers[i].t <= 0) { const fn = timers[i].fn; timers.splice(i, 1); fn(); }
     }
 
-    // 流星
-    for (const s of meteors.slots) {
-      if (!s.active) continue;
-      if (s.delay > 0) { s.delay -= dt; continue; }
-      s.t += dt / s.dur;
-      const k = Math.min(1, s.t);
-      const e = k * k;
-      const x = s.sx + (s.ex - s.sx) * e, y = s.sy + (s.ey - s.sy) * e, z = s.sz + (s.ez - s.sz) * e;
-      s.mesh.visible = true;
-      s.mesh.position.set(x, y, z);
-      s.mesh.scale.setScalar(s.size);
-      s.mesh.rotation.x += dt * 9; s.mesh.rotation.y += dt * 7;
-      add.emit(x, y, z, 0, 0, 0, 0.1, s.size * 2.6, s.size * 1.2, COL.fire, COL.fireEnd, 0.55);
-      if (rand() < 0.6) add.emit(x + (rand() - 0.5) * s.size, y + (rand() - 0.5) * s.size, z + (rand() - 0.5) * s.size,
-        (rand() - 0.5) * 0.5, 0.4 + rand() * 0.4, (rand() - 0.5) * 0.5, 0.4, s.size * 1.8, s.size * 0.4, COL.ember, COL.fireEnd, 0.6);
-      if (rand() < 0.5) smoke.emit(x, y, z, 0, 0.3, 0, 0.9, s.size * 1.8, s.size * 4, COL.smokeDark, COL.smokeEnd, 0.45, -0.2, 1);
-      if (k >= 1) {
-        s.active = false; s.mesh.visible = false;
-        const r = s.size * 3;
-        rings.emit(s.ex, s.ey + 0.04, s.ez, 0.1, r * 1.6, 0.4, COL.orange, 0.9, 0);
-        burst(add, s.ex, s.ey + 0.1, s.ez, 12, 2.8, 0.6, 0.45, 0.14, 0.03, COL.fire, COL.fireEnd, 1, 4, 1.5, s.ey);
-        burst(smoke, s.ex, s.ey + 0.1, s.ez, 4, 0.8, 0.8, 0.8, 0.25, 0.55, COL.dust, COL.dustEnd, 0.6, -0.2, 2);
-        for (let i = 0; i < 3; i++) debris.emit(s.ex, s.ey + 0.1, s.ez, (rand() - 0.5) * 3, 2 + rand() * 2, (rand() - 0.5) * 3, 0.04 + rand() * 0.04, COL.smokeDark, 1, s.ey);
-        lightFlash(s.ex, s.ey + 0.8, s.ez, COL.orange, 1.2);
-        if (world.cam) world.cam.shake(0.06 + s.size * 0.2, 0.25);
-      }
-    }
+    // 流星（＋v2.0 火焰風暴的小火球）
+    updateMeteors(meteors, dt, false);
+    updateMeteors(fireDrops, dt, true);
+
+    // v2.0：第二章＋英雄
+    decalA.begin(); decalN.begin();
+    chapter2Update(dt);
+    projectileFx(dt);
+    chargeUpdate(dt);
+    cloudsUpdate(dt);
+    swirls.update(dt);
+    streaks.update(dt);
+    shards.update(dt, dt > 0 ? (x, y, z, sz) => {
+      add.emit(x, y, z, 0, 0, 0, 0.08, sz * 2.2, sz * 0.8, COL.frost, COL.frostEnd, 0.5);
+      if (rand() < 0.5) smoke.emit(x, y + sz, z, 0, 0.2, 0, 0.6, sz * 1.2, sz * 2.4, COL.white, COL.ice, 0.35, 0, 1);
+    } : null);
 
     // 持續狀態（需要 state）
-    decalA.begin(); decalN.begin();
+
     let nb = 0, ni = 0, nr = 0, ns = 0;
     if (state) {
       if (state.towers) for (const t of state.towers) {
@@ -1355,6 +2279,7 @@ export function createEffects(world) {
     }
     for (const f of fakeZones) if (f.ttl > 0) { f.ttl -= dt; drawZone(f, dt); }
     bubbles.count = nb; ice.count = ni; roots.count = nr; stars.count = ns;
+    bubbles.visible = nb > 0; ice.visible = ni > 0; roots.visible = nr > 0; stars.visible = ns > 0;
     if (nb) bubbles.instanceMatrix.needsUpdate = true;
     if (ni) ice.instanceMatrix.needsUpdate = true;
     if (nr) roots.instanceMatrix.needsUpdate = true;
@@ -1362,8 +2287,8 @@ export function createEffects(world) {
     bubbleMat.uniforms.uTime.value = time % 1000;
     decalA.end(); decalN.end();
 
-    add.update(dt); smoke.update(dt); hard.update(dt);
-    rings.update(dt); darkRings.update(dt);
+    add.update(dt); smoke.update(dt); hard.update(dt); sparkle.update(dt);
+    rings.update(dt); darkRings.update(dt); trailQ.update(dt);
     debris.update(dt); spikes.update(dt);
     bolts.update(dt, cam);
     texts.update(dt, cam, viewH);
@@ -1375,6 +2300,37 @@ export function createEffects(world) {
       overlayU.uAlpha.value = ov.a * Math.max(0, ov.life / ov.max);
     } else overlay.visible = false;
     if (flashI > 0.01) { flash.intensity = flashI; flashI *= Math.exp(-dt * 9); } else { flash.intensity = 0; flashI = 0; }
+  }
+
+  function updateMeteors(pool, dt, small) {
+    for (const s of pool.slots) {
+      if (!s.active) continue;
+      if (s.delay > 0) { s.delay -= dt; continue; }
+      s.t += dt / s.dur;
+      const k = Math.min(1, s.t);
+      const e = k * k;
+      const x = s.sx + (s.ex - s.sx) * e, y = s.sy + (s.ey - s.sy) * e, z = s.sz + (s.ez - s.sz) * e;
+      s.mesh.visible = true;
+      s.mesh.position.set(x, y, z);
+      s.mesh.scale.setScalar(s.size);
+      s.mesh.rotation.x += dt * 9; s.mesh.rotation.y += dt * 7;
+      add.emit(x, y, z, 0, 0, 0, 0.1, s.size * 2.6, s.size * 1.2, COL.fire, COL.fireEnd, 0.55);
+      if (rand() < 0.6) add.emit(x + (rand() - 0.5) * s.size, y + (rand() - 0.5) * s.size, z + (rand() - 0.5) * s.size,
+        (rand() - 0.5) * 0.5, 0.4 + rand() * 0.4, (rand() - 0.5) * 0.5, 0.4, s.size * 1.8, s.size * 0.4, COL.ember, COL.fireEnd, 0.6);
+      if (rand() < 0.5) smoke.emit(x, y, z, 0, 0.3, 0, 0.9, s.size * 1.8, s.size * 4, COL.smokeDark, COL.smokeEnd, 0.45, -0.2, 1);
+      if (k >= 1) {
+        s.active = false; s.mesh.visible = false;
+        const r = s.size * 3;
+        rings.emit(s.ex, s.ey + 0.04, s.ez, 0.1, r * 1.6, 0.4, COL.orange, 0.9, 0);
+        burst(add, s.ex, s.ey + 0.1, s.ez, 12, 2.8, 0.6, 0.45, 0.14, 0.03, COL.fire, COL.fireEnd, 1, 4, 1.5, s.ey);
+        burst(smoke, s.ex, s.ey + 0.1, s.ez, 4, 0.8, 0.8, 0.8, 0.25, 0.55, COL.dust, COL.dustEnd, 0.6, -0.2, 2);
+        for (let i = 0; i < 3; i++) debris.emit(s.ex, s.ey + 0.1, s.ez, (rand() - 0.5) * 3, 2 + rand() * 2, (rand() - 0.5) * 3, 0.04 + rand() * 0.04, COL.smokeDark, 1, s.ey);
+        lightFlash(s.ex, s.ey + 0.8, s.ez, COL.orange, 1.2);
+        if (small) { rings.emit(s.ex, s.ey + 0.045, s.ez, 0.1, 0.7, 0.3, COL.fire, 0.8, 1, 1, 0); addLight(s.ex + world.W / 2, s.ez + world.H / 2, 1.2, 0.35, 1, 0, 0.8); }
+        else if (world.cam) world.cam.shake(0.06 + s.size * 0.2, 0.25);
+      }
+    }
+
   }
 
   function drawZone(zn, dt) {
@@ -1408,7 +2364,11 @@ export function createEffects(world) {
   }
 
   function clear() {
-    for (const p of [add, smoke, hard, rings, darkRings, debris, spikes, bolts, texts, pillars, slashes, meteors]) p.clear();
+    for (const p of [add, smoke, hard, rings, darkRings, debris, spikes, bolts, texts, pillars, slashes, meteors,
+      sparkle, trailQ, swirls, streaks, shards, fireDrops, mounds]) p.clear();
+    projSeen.clear(); burrowTrack.clear(); charge.active = false;
+    for (const c of clouds) c.ttl = 0;
+    beams.begin(); beams.end(0);
     for (const f of fakeZones) f.ttl = 0;
     timers.length = 0; recentGold.length = 0; towerPos.clear();
     ov.life = 0; overlay.visible = false; flashI = 0; flash.intensity = 0;
@@ -1418,10 +2378,10 @@ export function createEffects(world) {
 
   return {
     root, handle, update, clear,
-    setState(st) { state = st || null; zonesManaged = false; },
+    setState(st) { state = st || null; zonesManaged = false; projSeen.clear(); burrowTrack.clear(); },
     /** 鏡頭震動的捷徑 */
     shake(amp, dur) { if (world.cam) world.cam.shake(amp, dur); },
     /** 除錯用：目前作用中的粒子數 */
-    stats() { return { add: add.live, smoke: smoke.live, hard: hard.live, rings: rings.live, debris: debris.live }; },
+    stats() { return { add: add.live, smoke: smoke.live, hard: hard.live, sparkle: sparkle.live, rings: rings.live, debris: debris.live, beams: beams.n }; },
   };
 }

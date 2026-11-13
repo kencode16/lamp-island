@@ -42,4 +42,40 @@ export const BAL = {
   },
   // 塔的發射點高度（依等級 1–4）
   MUZZLE_Y: [0, 0.9, 1.1, 1.3, 1.55],
+
+  // ===== 第二章（v2.0） =====
+  // 光照（只在 state.dark 的關卡生效）
+  LAMP_LIGHT: 4.5,          // 守護燈照亮半徑
+  MAGE_LIGHT: 1.2,          // 法師塔水晶球
+  MUSHROOM_LIGHT: 1.5,      // 發光蘑菇 U
+  CRYSTAL_LIGHT: 2.0,       // 水晶 C（被照到才亮）
+  CRYSTAL_REACH: 0.35,      // 水晶格中心離光源邊緣多近就算被照到（水晶佔一格）
+  FIRE_LIGHT_ADD: 0.5,      // 火焰地帶光半徑＝地帶半徑＋這個
+  METEOR_LIGHT_SEC: 3,      // 流星雨落下後照亮全場幾秒
+  LASER_LIGHT: 1.0,         // 稜鏡雷射照到的目標周圍
+  SPELL_LIGHT_SEC: 1.2,     // 英雄技能閃光持續秒數
+  FIREBALL_LIGHT: 1.0,      // 法師英雄火球爆開的短暫光
+  FIREBALL_LIGHT_SEC: 0.4,
+  LIGHT_EDGE: 0.75,         // lightAt 在光源半徑外漸暗到 0 的距離（給畫面用；lit 只看半徑內）
+
+  // 稜鏡塔
+  PRISM_HIT_EVERY: 0.25,    // 持續雷射每隔幾秒發一次 hit 事件（累積傷害）
+  PRISM_PIERCE_WIDTH: 0.4,  // 聚焦貫穿：離雷射線多近算被打到
+  PRISM_PIERCE_MUL: 0.6,    // 貫穿到的其他敵人吃幾成傷害
+
+  // 敵人
+  BURROW_CHECK: 0.2,        // 地鼠每隔幾秒檢查附近有沒有塔
+  EAT_RETRY: 0.5,           // 巨蟲吞燈時間到但附近沒燈籠：每隔幾秒再找
+  FAIRY_AIR_REACH: 1.0,     // 飛行敵人離妖精多近會順手攻擊她
+
+  // 英雄
+  HERO_RETARGET: 0.2,       // 遠程英雄重選目標間隔
+  CHARGE_SPEED: 10,         // 聖燈衝鋒速度（格/秒）
+  KNOCKBACK_BOSS_MUL: 0.5,  // 王被撞退距離倍率
+  // 英雄投射物（追蹤，格/秒）；y＝發射高度
+  HERO_PROJ: {
+    fairyBolt: { speed: 11, y: 1.0 },
+    fireball:  { speed: 8,  y: 1.0 },
+    starBolt:  { speed: 9,  y: 1.0 },
+  },
 };
